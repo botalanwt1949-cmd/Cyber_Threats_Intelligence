@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    build: .
+    image: cti-dashboard:1.0.0
+    container_name: cti-dashboard
+    ports:
+      - "127.0.0.1:8092:8090"   # loopback-only per fleet policy; 8090/8091 seized on host
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

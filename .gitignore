@@ -1,0 +1,14 @@
+data/
+__pycache__/
+*.pyc
+out/
+.v2c/
+.video_agent/
+.mimosa/
+.git/
+*.log
+
+# session/harness scaffolding — not part of the deliverable
+.claude/
+AGENTS.md
+CLAUDE.md

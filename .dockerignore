@@ -1,0 +1,12 @@
+data/
+.git/
+out/
+.v2c/
+.video_agent/
+.mimosa/
+__pycache__/
+*.pyc
+tests/
+requirements-dev.txt
+README.md
+docker-compose.yml

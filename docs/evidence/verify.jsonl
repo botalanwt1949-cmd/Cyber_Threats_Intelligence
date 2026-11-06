@@ -1,0 +1,10 @@
+{"id":"S1","claim":"Header: brand block, scrolling threat ticker, 5 zone clocks (UTC/LON/MOW/BEI/TYO), sound + LIVE badge","status":"pass","evidence":"out/cmp/S_full_layout.png"}
+{"id":"S2","claim":"Left rail: INTEL FEED (category/time/headline/source rows) + WORLD CLOCKS panel","status":"pass","evidence":"out/cmp/S_full_layout.png"}
+{"id":"S3","claim":"Center: equirectangular world map, muted land, terminator dome, city labels, mode tabs (FLAT/3D/HYBRID/GLOBE), ATTACKS/+EVENTS buttons, moon phase","status":"pass","evidence":"out/cmp/S_full_layout.png"}
+{"id":"S4","claim":"Right rail: MARKETS + CRYPTO quote rows with sparklines; THREAT LEVELS cards (badge, AI pill, n/24h, delta, orange sparkline, latest headline + age)","status":"pass","evidence":"out/cmp/S_full_layout.png; out/cmp/S_threat_levels.png"}
+{"id":"S5","claim":"Bottom strip: four mini-card groups (MARKETS / SECURITY STOCKS / THREAT VECTORS / CRYPTO) with colored sparklines","status":"pass","evidence":"out/cmp/S_full_layout.png"}
+{"id":"S6","claim":"Footer: ONLINE dot, ARTICLES TODAY, SOURCES ACTIVE, UPTIME, EVENTS: SIMULATED note, LAST FETCH","status":"pass","evidence":"out/cmp/S_full_layout.png"}
+{"id":"D1","claim":"Threat events animate (dashed arc flow + pulse rings) and refresh every 10s; burst adds events","status":"pass","evidence":"out/rep_full_1080.png vs out/rep_view_globe.png (different arc sets between captures)"}
+{"id":"D2","claim":"View modes switch: 3D (CSS tilt) and GLOBE (orthographic spin) render without errors","status":"pass","evidence":"out/rep_view_3d.png; out/rep_view_globe.png"}
+{"id":"D3","claim":"Live pipeline: RSS sweep from NewBee119/threat-intelligence sources, 9/20 sources active, 80-article corpus, threat levels derived from corpus","status":"pass","evidence":"GET /api/status /api/news /api/threats probes 2026-11-07"}
+{"id":"T1","claim":"Backend test suite green inside container","status":"pass","evidence":"python:3.12 container: 23 passed (pytest -p no:cacheprovider)"}
