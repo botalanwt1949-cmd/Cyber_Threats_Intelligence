@@ -72,8 +72,11 @@ body {
 .hdr-badge { border: 1px solid var(--cyan); color: var(--cyan); font-size: 10px; letter-spacing: 1px; padding: 3px 8px; }
 
 /* ---------- main grid ---------- */
-#main { flex: 1; display: grid; grid-template-columns: 238px 1fr 238px; gap: 6px; min-height: 0; }
-#left, #right { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+#main { flex: 1; display: grid; grid-template-columns: 482px 1fr 238px; gap: 6px; min-height: 0; }
+#left, #right { display: grid; gap: 6px; min-height: 0; min-width: 0; }
+/* left region: row 1 = ATTACKS + Research (same height), row 2 = INTEL FEED +
+   Threat Intel (same height), row 3 = SOURCES spanning both columns */
+#left { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 238px minmax(0, 1.1fr) minmax(0, 1fr); }
 
 .panel {
   background: linear-gradient(180deg, var(--panel-bg-1), var(--panel-bg-2));
@@ -90,7 +93,8 @@ body {
 .panel-count { color: var(--dim); font-weight: 400; letter-spacing: 1px; font-size: 9px; }
 
 /* ---------- left: intel feed ---------- */
-.feed-panel { flex: 1 1 auto; max-height: 38%; min-height: 0; }
+.feed-panel { grid-area: 2 / 1; min-height: 0; }
+#tintel-panel { grid-area: 2 / 2; min-height: 0; }
 .feed-roll { flex: 1 1 auto; min-height: 90px; overflow: hidden; }
 .news-list { list-style: none; will-change: transform; }
 /* the vertical roll is JS-driven too (compositor stalls CSS animations here);
@@ -126,8 +130,8 @@ body {
 .chip-dot.part { background: var(--orange); }
 .chip-dot.bad { background: var(--red); }
 
-/* left: per-source health panel — takes the space freed by the removed clocks */
-.sources-panel { flex: 1 1 auto; min-height: 0; }
+/* left: per-source health panel — spans both left-region columns */
+.sources-panel { grid-area: 3 / 1 / 4 / 3; min-height: 0; }
 .sources-grid { padding: 5px 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; will-change: transform; }
 .src-cell {
   display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px;
@@ -166,7 +170,7 @@ body {
 .map-btn { margin-left: 8px; }
 .map-moon { margin-left: auto; color: var(--dim); font-size: 10px; letter-spacing: 1px; }
 
-#map-wrap { flex: 1 1 auto; position: relative; background:
+#map-wrap { flex: 0 0 42%; position: relative; background:
   radial-gradient(900px 500px at 50% 45%, rgba(46, 30, 70, 0.35), transparent 75%), #0c0912;
   border: 1px solid var(--panel-border); min-height: 0; overflow: hidden; }
 #map { width: 100%; height: 100%; display: block; }
@@ -182,9 +186,12 @@ body {
 .map-tip.hidden { display: none; }
 
 /* ---------- bottom: threat-news category strip ---------- */
+/* ---------- bottom: threat-news cards (Traditional / Gov & CERT / Endpoint;
+   Research and Threat Intel moved into the left region) ---------- */
 #catstrip {
-  flex: 0 0 118px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
-  min-height: 0;
+  flex: 1 1 auto; min-height: 150px;
+  display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr;
+  gap: 6px; min-width: 0;
 }
 .cat-card { background: linear-gradient(180deg, var(--panel-bg-1), var(--panel-bg-2));
   border: 1px solid var(--panel-border); display: flex; flex-direction: column;
@@ -254,10 +261,14 @@ body {
 /* ---------- map layers (Check Point threat-map clone) ---------- */
 .country { fill: url(#dotgrid); stroke: none; }
 .graticule { fill: none; stroke: rgba(150, 140, 170, 0.10); stroke-width: 0.5; }
-.city-label { fill: rgba(215, 205, 235, 0.55); font-size: 8.5px; letter-spacing: 0.5px;
+#map { cursor: grab; }
+#map:active { cursor: grabbing; }
+/* --k is the current zoom factor: strokes/labels counter-scale to stay crisp */
+.map-zoom { --k: 1; }
+.city-label { fill: rgba(215, 205, 235, 0.55); font-size: calc(8.5px / var(--k, 1)); letter-spacing: 0.5px;
   font-family: 'JBMono', monospace; paint-order: stroke; stroke: rgba(6, 4, 12, 0.85); stroke-width: 2px; }
-.arc { fill: none; stroke-width: 1.4; stroke-linecap: round; }
-.arc-label { font-size: 9.5px; font-family: 'JBMono', monospace; fill: rgba(228, 222, 240, 0.85);
+.arc { fill: none; stroke-width: calc(1.4px / var(--k, 1)); stroke-linecap: round; }
+.arc-label { font-size: calc(9.5px / var(--k, 1)); font-family: 'JBMono', monospace; fill: rgba(228, 222, 240, 0.85);
   paint-order: stroke; stroke: rgba(6, 4, 12, 0.85); stroke-width: 2.5px; }
 .pulse-ring { animation: ring 3s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes ring { 0% { transform: scale(0.2); opacity: 0.9; } 100% { transform: scale(2.4); opacity: 0; } }
@@ -278,7 +289,9 @@ body {
   background: var(--c); }
 
 /* attacks feed panel (Check Point style ring badges) */
-.attacks-panel { flex: 0 0 238px; }
+.attacks-panel { grid-area: 1 / 1; }
+.cat-panel { min-height: 0; }
+#research-panel { grid-area: 1 / 2; }
 /* .attack-list is the rolling track inside a clipping viewport */
 .panel-roll { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .attack-list { list-style: none; will-change: transform; }
@@ -317,6 +330,6 @@ body {
 
 /* responsive floor */
 @media (max-width: 1100px) {
-  #main { grid-template-columns: 200px 1fr 200px; }
+  #main { grid-template-columns: 400px 1fr 200px; }
   .hdr-clocks { display: none; }
 }

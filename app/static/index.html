@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cyber Threats Intelligence — Command Desk</title>
   <meta name="description" content="Single-screen cyber threat intelligence dashboard: live RSS intel feed, global threat map, threat levels and per-category news cards." />
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=10" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=18" />
 </head>
 <body>
   <div id="app">
@@ -26,10 +26,18 @@
           <h2 class="panel-title">ATTACKS <span class="panel-count" id="atk-rate">— /MIN</span></h2>
           <div class="panel-roll"><ul class="attack-list" id="attack-list"></ul></div>
         </section>
+        <section class="panel cat-panel" id="research-panel">
+          <h2 class="panel-title">RESEARCH <span class="panel-count" data-role="n">0/24h</span></h2>
+          <div class="cat-roll"><div class="cat-track" id="research-track"></div></div>
+        </section>
         <section class="panel feed-panel">
           <h2 class="panel-title">INTEL FEED <span class="panel-count" id="feed-count">0 ARTICLES</span></h2>
           <div class="feed-chips" id="feed-chips"></div>
           <div class="feed-roll"><ul class="news-list" id="news-list"></ul></div>
+        </section>
+        <section class="panel cat-panel" id="tintel-panel">
+          <h2 class="panel-title">THREAT INTEL <span class="panel-count" data-role="n">0/24h</span></h2>
+          <div class="cat-roll"><div class="cat-track" id="tintel-track"></div></div>
         </section>
         <section class="panel sources-panel">
           <h2 class="panel-title">SOURCES <span class="panel-count" id="sources-count">—</span></h2>
@@ -51,6 +59,9 @@
           </div>
           <button id="btn-arcs" class="map-btn active">ATTACKS</button>
           <button id="btn-burst" class="map-btn">+ EVENTS</button>
+          <button id="zoom-in" class="map-btn" title="Zoom in">+</button>
+          <button id="zoom-out" class="map-btn" title="Zoom out">−</button>
+          <button id="zoom-reset" class="map-btn" title="Reset zoom">⌂</button>
           <div class="map-moon" id="map-moon">🌑 New Moon 0%</div>
         </div>
         <div id="map-wrap"><svg id="map" role="img" aria-label="Global threat activity map"></svg>
@@ -89,7 +100,7 @@
 
   <script src="/static/vendor/d3.min.js"></script>
   <script src="/static/vendor/topojson-client.min.js"></script>
-  <script src="/static/js/map.js?v=10"></script>
-  <script src="/static/js/dashboard.js?v=11"></script>
+  <script src="/static/js/map.js?v=19"></script>
+  <script src="/static/js/dashboard.js?v=20"></script>
 </body>
 </html>

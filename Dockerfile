@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 
-RUN useradd --create-home --uid 10001 cti && chown -R cti:cti /app
+RUN useradd --create-home --uid 10001 cti && chown -R cti:cti /app \
+  && mkdir -p /app/data && chown cti:cti /app/data
 USER cti
 
 EXPOSE 8090

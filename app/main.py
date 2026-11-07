@@ -270,15 +270,29 @@ async def api_sources() -> JSONResponse:
             }
         )
 
+    # per-group newest headlines from the FULL corpus (any age) — slow-cadence
+    # sources must stay visible even when nothing landed in the last 24h
+    by_group: dict[str, list] = {}
+    for a in state["articles"]:
+        by_group.setdefault(a.source_group, []).append(a)
+
     groups = []
     for group in feeds.GROUPS:
         members = [s for s in sources if s["group"] == group]
+        latest = sorted(
+            by_group.get(group, []), key=lambda a: a.published, reverse=True
+        )[:8]
         groups.append(
             {
                 "name": group,
                 "active": sum(1 for m in members if m["ok"]),
                 "total": len(members),
                 "articles": sum(m["articles"] for m in members),
+                "latest": [
+                    {"id": a.id, "title": a.title, "source": a.source,
+                     "published": a.published}
+                    for a in latest
+                ],
             }
         )
 

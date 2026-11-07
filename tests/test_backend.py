@@ -195,6 +195,10 @@ def test_api_sources_contract(client):
     assert [g["name"] for g in data["groups"]] == list(feeds.GROUPS)
     assert sum(g["total"] for g in data["groups"]) == len(feeds.SOURCES)
     assert data["sources_active"] == 0  # no sweep reports in this fixture
+    # every group carries a latest-headlines list (full corpus, any age)
+    assert all(isinstance(g["latest"], list) for g in data["groups"])
+    trad = next(g for g in data["groups"] if g["name"] == "Traditional")
+    assert trad["latest"] and trad["latest"][0]["source"] == "Securelist"
 
 
 def test_api_sources_reports_join(client_reports):

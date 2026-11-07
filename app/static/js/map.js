@@ -31,10 +31,25 @@
 
   const gRoot = SVG.append('g').attr('class', 'map-root');
   const gBack = gRoot.append('g');
-  const gCountries = gRoot.append('g');
-  const gGraticule = gRoot.append('g');
-  const gLabels = gRoot.append('g');
-  const gEvents = gRoot.append('g');
+  // everything zoomable lives in gZoom; the background grid stays fixed so
+  // panning never exposes empty edges
+  const gZoom = gRoot.append('g').attr('class', 'map-zoom');
+  const gCountries = gZoom.append('g');
+  const gGraticule = gZoom.append('g');
+  const gLabels = gZoom.append('g');
+  const gEvents = gZoom.append('g');
+
+  // wheel / drag / double-click zoom+pan; buttons drive zoomBy()/zoomReset()
+  let zoomK = 1;
+  const zoomBehavior = d3.zoom()
+    .scaleExtent([1, 12])
+    .on('zoom', (ev) => {
+      zoomK = ev.transform.k;
+      gZoom.attr('transform', ev.transform);
+      // counter-scale strokes and labels so they stay crisp when zoomed in
+      gZoom.style('--k', zoomK);
+    });
+  SVG.call(zoomBehavior);
 
   const CITY_LABELS = ['Washington D.C.', 'São Paulo', 'London', 'Moscow', 'New Delhi',
     'Beijing', 'Tokyo', 'Sydney', 'Nairobi', 'Bogotá', 'San Juan', 'Dubai'];
@@ -63,10 +78,25 @@
     width = Math.max(320, rect.width);
     height = Math.max(240, rect.height);
     SVG.attr('viewBox', `0 0 ${width} ${height}`);
+    // keep panning bounded to the rendered map box
+    zoomBehavior.translateExtent([[0, 0], [width, height]]);
     gBack.selectAll('rect').data([1]).join('rect')
       .attr('class', 'grid-bg').attr('width', width).attr('height', height)
       .attr('fill', 'url(#gridbg)');
     applyProjection();
+  }
+
+  function zoomBy(factor) {
+    // d3 transitions are rAF-driven and this host's compositor stalls them —
+    // apply the new transform synchronously, zooming toward the map centre
+    const target = Math.min(12, Math.max(1, zoomK * factor));
+    const cx = width / 2, cy = height / 2;
+    SVG.call(zoomBehavior.transform,
+      d3.zoomIdentity.translate(cx, cy).scale(target).translate(-cx, -cy));
+  }
+
+  function zoomReset() {
+    SVG.call(zoomBehavior.transform, d3.zoomIdentity);
   }
 
   function applyProjection() {
@@ -272,5 +302,6 @@
   resize();
   loadWorld();
 
-  window.CTIMap = { setEvents, setView, toggleArcs, burst, setLegend };
+  window.CTIMap = { setEvents, setView, toggleArcs, burst, setLegend,
+    zoomIn: () => zoomBy(1.6), zoomOut: () => zoomBy(1 / 1.6), zoomReset };
 })();

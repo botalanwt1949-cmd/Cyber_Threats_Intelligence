@@ -66,16 +66,16 @@
     el.addEventListener('pointerenter', () => { r.paused = true; });
     el.addEventListener('pointerleave', () => { r.paused = false; });
   }
-  function resetRoller(el) {
+  function resetRoller(el, period) {
     const r = rollers.get(el);
     if (!r) return;
     r.offset = 0;
+    // loop length = one copy of the content; for a duplicated track that is
+    // half the scroll size, for an N-copies track pass the period explicitly
     const full = r.axis === 'y' ? el.scrollHeight : el.scrollWidth;
-    // 'loop': duplicated track, one loop = half the scroll size (seamless);
-    // 'end': single track, loop when the end of the content is reached
     r.half = r.mode === 'end'
       ? Math.max(0, full - (r.axis === 'y' ? el.parentElement.clientHeight : el.parentElement.clientWidth))
-      : full / 2;
+      : (period !== undefined ? period : full / 2);
     el.style.transform = r.axis === 'y' ? 'translateY(0)' : 'translateX(0)';
   }
   function stopRoller(el) {
@@ -186,27 +186,41 @@
     }).join('');
   }
 
-  // ---------- bottom: one rolling card per threat-news category ----------
+  // ---------- category cards: Research + Threat Intel live beside ATTACKS /
+  // INTEL FEED in the left region; Traditional / Gov & CERT / Endpoint stay in
+  // the bottom strip ----------
   let catScaffoldBuilt = false;
   const catCards = new Map();  // group name -> {dot, n, h, track, sig}
+  function panelUi(panelId, trackId) {
+    const p = document.getElementById(panelId);
+    return {
+      dot: null, n: p.querySelector('[data-role="n"]'), h: null,
+      track: document.getElementById(trackId), sig: '',
+    };
+  }
   function renderCatStrip() {
     const groups = sourcesState.groups || [];
     if (!groups.length) return;
-    // build the card shells once so track elements keep their roller registration
+    // build the strip shells once so track elements keep their roller
+    // registration; Research / Threat Intel tracks are static panel elements
     if (!catScaffoldBuilt) {
+      catCards.set('Research', panelUi('research-panel', 'research-track'));
+      catCards.set('Threat Intel', panelUi('tintel-panel', 'tintel-track'));
+      registerRoller($('research-track'), 'y', 8);
+      registerRoller($('tintel-track'), 'y', 8);
       const strip = $('catstrip');
       strip.innerHTML = '';
-      groups.forEach((g) => {
+      ['Traditional', 'Gov / CERT', 'Endpoint'].forEach((name) => {
         const card = document.createElement('div');
         card.className = 'cat-card';
         card.innerHTML =
           `<div class="cat-top"><i class="chip-dot idle" data-role="dot"></i>` +
-          `<span class="cat-name">${esc(g.name)}</span>` +
+          `<span class="cat-name">${esc(name)}</span>` +
           `<span class="cat-n" data-role="n">0/24h</span>` +
           `<span class="cat-health" data-role="h">0/0</span></div>` +
           `<div class="cat-roll"><div class="cat-track" data-role="track"></div></div>`;
         strip.appendChild(card);
-        catCards.set(g.name, {
+        catCards.set(name, {
           dot: card.querySelector('[data-role="dot"]'),
           n: card.querySelector('[data-role="n"]'),
           h: card.querySelector('[data-role="h"]'),
@@ -217,17 +231,15 @@
       });
       catScaffoldBuilt = true;
     }
-    const arts = lastNews ? lastNews.articles : [];
+    // headlines come from /api/sources per-group `latest` (full corpus, any
+    // age) — slow-cadence categories stay populated between publications
     for (const g of groups) {
       const ui = catCards.get(g.name);
       if (!ui) continue;
-      ui.dot.className = `chip-dot ${chipDot(g.active, g.total)}`;
+      if (ui.dot) ui.dot.className = `chip-dot ${chipDot(g.active, g.total)}`;
       ui.n.textContent = `${g.articles}/24h`;
-      ui.h.textContent = `${g.active}/${g.total}`;
-      const items = arts
-        .filter((a) => a.source_group === g.name)
-        .sort((a, b) => b.published - a.published)
-        .slice(0, 8);
+      if (ui.h) ui.h.textContent = `${g.active}/${g.total}`;
+      const items = (g.latest || []).slice(0, 8);
       const sig = items.map((a) => a.id).join(',');
       if (sig === ui.sig) continue;   // unchanged → keep rolling
       ui.sig = sig;
@@ -241,10 +253,14 @@
       }
       const html = items.map(item).join('');
       ui.track.innerHTML = html;
-      // roll only when several headlines overflow the card; a lone headline stays static
-      if (items.length > 1 && ui.track.scrollHeight > ui.track.parentElement.clientHeight + 4) {
-        ui.track.innerHTML = html + html;   // duplicated for the seamless loop
-        resetRoller(ui.track);
+      // always roll when several headlines exist: repeat the track enough
+      // times that the loop never exposes a gap, even in tall cards
+      if (items.length > 1) {
+        const contentH = Math.max(60, ui.track.scrollHeight);
+        const viewH = ui.track.parentElement.clientHeight;
+        const copies = Math.max(2, Math.ceil((viewH + contentH) / contentH) + 1);
+        ui.track.innerHTML = html.repeat(copies);
+        resetRoller(ui.track, contentH);
       } else {
         stopRoller(ui.track);
       }
@@ -420,6 +436,9 @@
   $('btn-burst').addEventListener('click', async () => {
     try { CTIMap.burst(await getJSON('/api/map-events')); } catch (e) { console.warn(e); }
   });
+  $('zoom-in').addEventListener('click', () => CTIMap.zoomIn());
+  $('zoom-out').addEventListener('click', () => CTIMap.zoomOut());
+  $('zoom-reset').addEventListener('click', () => CTIMap.zoomReset());
   $('btn-snd').addEventListener('click', (e) => {
     const muted = e.currentTarget.textContent === '🔇';
     e.currentTarget.textContent = muted ? '🔊' : '🔇';
