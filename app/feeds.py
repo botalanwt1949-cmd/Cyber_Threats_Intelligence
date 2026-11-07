@@ -38,7 +38,7 @@ import httpx
 log = logging.getLogger("cti.feeds")
 
 MAX_REDIRECTS = 4
-MAX_BYTES = 2_000_000
+MAX_BYTES = 3_000_000  # vendor feeds with embedded HTML (e.g. Squarespace) run ~2-3 MB
 FETCH_TIMEOUT = 12.0
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
@@ -110,6 +110,7 @@ SOURCES: tuple[Source, ...] = (
     Source("Unit 42", "https://unit42.paloaltonetworks.com/feed/", "Threat Intel"),
     Source("The DFIR Report", "https://thedfirreport.com/feed/", "Threat Intel"),
     Source("Exploit-DB", "https://www.exploit-db.com/rss.xml", "Threat Intel"),
+    Source("Zero Day Initiative", "https://www.zerodayinitiative.com/blog/atom.xml", "Threat Intel"),
     Source("GreyNoise", "https://www.greynoise.io/blog/rss.xml", "Threat Intel"),
     # 传统安全类 — established AV / platform vendors
     Source("Securelist", "https://securelist.com/feed/", "Traditional"),
