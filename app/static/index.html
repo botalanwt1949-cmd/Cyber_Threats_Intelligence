@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cyber Threats Intelligence — Command Desk</title>
-  <meta name="description" content="Single-screen cyber threat intelligence dashboard: live RSS intel feed, global threat map, threat levels and market strip." />
-  <link rel="stylesheet" href="/static/css/dashboard.css" />
+  <meta name="description" content="Single-screen cyber threat intelligence dashboard: live RSS intel feed, global threat map, threat levels and per-category news cards." />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=10" />
 </head>
 <body>
   <div id="app">
     <header id="topbar">
-      <div class="brand"><span class="sq"></span><span class="brand-name">CYBER THREAT&nbsp;INTEL</span></div>
+      <div class="brand"><span class="sq"></span><span class="brand-name">CYBER THREATS&nbsp;INTELLIGENCE</span></div>
       <div class="ticker-wrap"><div class="ticker" id="ticker"><span class="tick-time">[--:--:--]</span><span class="tick-text">Awaiting first feed sweep…</span></div></div>
       <div class="hdr-clocks" id="hdr-clocks"></div>
       <div class="hdr-actions">
@@ -22,17 +22,26 @@
 
     <main id="main">
       <aside id="left">
+        <section class="panel attacks-panel">
+          <h2 class="panel-title">ATTACKS <span class="panel-count" id="atk-rate">— /MIN</span></h2>
+          <div class="panel-roll"><ul class="attack-list" id="attack-list"></ul></div>
+        </section>
         <section class="panel feed-panel">
           <h2 class="panel-title">INTEL FEED <span class="panel-count" id="feed-count">0 ARTICLES</span></h2>
-          <ul class="news-list" id="news-list"></ul>
+          <div class="feed-chips" id="feed-chips"></div>
+          <div class="feed-roll"><ul class="news-list" id="news-list"></ul></div>
         </section>
-        <section class="panel clocks-panel">
-          <h2 class="panel-title">WORLD CLOCKS</h2>
-          <div class="clocks-grid" id="world-clocks"></div>
+        <section class="panel sources-panel">
+          <h2 class="panel-title">SOURCES <span class="panel-count" id="sources-count">—</span></h2>
+          <div class="panel-roll"><div class="sources-grid" id="sources-grid"></div></div>
         </section>
       </aside>
 
       <section id="center">
+        <div id="tm-head">
+          <span class="tm-title">LIVE CYBER THREAT MAP</span>
+          <span class="tm-counter"><b id="tm-counter">0</b> ATTACKS ON THIS DAY</span>
+        </div>
         <div id="mapbar">
           <div class="map-tabs" id="map-tabs">
             <button class="map-tab active" data-view="flat">FLAT</button>
@@ -46,18 +55,20 @@
         </div>
         <div id="map-wrap"><svg id="map" role="img" aria-label="Global threat activity map"></svg>
           <div id="map-tip" class="map-tip hidden"></div>
+          <div id="map-legend" aria-label="Threat category legend"></div>
         </div>
-        <div id="ministrip"></div>
+        <div id="catstrip"></div>
       </section>
 
       <aside id="right">
-        <section class="panel market-panel">
-          <h2 class="panel-title">MARKETS</h2>
-          <ul class="quote-list" id="markets-list"></ul>
+        <section class="panel targets-panel">
+          <h2 class="panel-title">TOP TARGETED COUNTRIES</h2>
+          <p class="panel-sub">Highest simulated attack rate per organization today</p>
+          <ul class="targets-list" id="top-countries"></ul>
         </section>
-        <section class="panel market-panel">
-          <h2 class="panel-title">CRYPTO</h2>
-          <ul class="quote-list" id="crypto-list"></ul>
+        <section class="panel vectors-panel">
+          <h2 class="panel-title">THREAT VECTORS <span class="panel-count">24H CORPUS</span></h2>
+          <ul class="vectors-list" id="vectors-list"></ul>
         </section>
         <section class="panel threats-panel">
           <h2 class="panel-title">THREAT LEVELS</h2>
@@ -71,14 +82,14 @@
       <span class="status-item">ARTICLES TODAY <b id="st-articles">0</b></span>
       <span class="status-item">SOURCES ACTIVE <b id="st-sources">0</b></span>
       <span class="status-item">UPTIME <b id="st-uptime">00:00:00</b></span>
-      <span class="status-item" id="st-note">EVENTS: SIMULATED · FEEDS: LIVE</span>
+      <span class="status-item" id="st-note">MAP + ATTACKS: SIMULATED · FEEDS: LIVE</span>
       <span class="status-right">LAST FETCH: <b id="st-fetch">--:--:--</b></span>
     </footer>
   </div>
 
   <script src="/static/vendor/d3.min.js"></script>
   <script src="/static/vendor/topojson-client.min.js"></script>
-  <script src="/static/js/map.js"></script>
-  <script src="/static/js/dashboard.js"></script>
+  <script src="/static/js/map.js?v=10"></script>
+  <script src="/static/js/dashboard.js?v=11"></script>
 </body>
 </html>

@@ -10,5 +10,6 @@ out/
 
 # session/harness scaffolding — not part of the deliverable
 .claude/
+.zcode/
 AGENTS.md
 CLAUDE.md

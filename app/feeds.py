@@ -1,9 +1,18 @@
 """RSS aggregation for the Cyber Threats Intelligence dashboard.
 
-Sources are curated from https://github.com/NewBee119/threat-intelligence —
-a hand-maintained index of threat-intelligence publishers, grouped by the
-same sections the README uses (General / Cloud / ICS / Endpoint / Mobile /
-Threat Intel / Traditional Security).
+Sources are curated from two hand-maintained indexes of threat-intelligence
+publishers, merged into one group taxonomy:
+
+- https://github.com/NewBee119/threat-intelligence — General / Cloud / ICS /
+  Endpoint / Mobile / Threat Intel / Traditional sections
+- https://github.com/zer0yu/CyberSecurityRSS — contributes the Research and
+  Gov / CERT groups plus many of the publishers slotted into the groups above
+
+Every entry was liveness-probed (HTTP 200 + XML body) before inclusion;
+candidates behind bot-walls or with invalid TLS were dropped. Feeds that
+moved hosts (rebrands, www/non-www shifts) were re-pointed at their verified
+final URLs; retired publishers (Cybereason, AlienVault Labs, Bugtraq, …)
+were removed rather than left dark.
 
 All outbound fetching is guarded: http(s) only, domain allowlist, and a
 DNS-resolution check that rejects loopback / private / reserved targets.
@@ -80,34 +89,66 @@ class Source:
     group: str  # section name from the NewBee119/threat-intelligence README
 
 
-# Curated from NewBee119/threat-intelligence README (sections preserved).
+# Curated from NewBee119/threat-intelligence + zer0yu/CyberSecurityRSS
+# (every entry liveness-probed), regrouped into the dashboard's five
+# threat-news categories: news media & intel firms -> Threat Intel,
+# established AV/platform vendors -> Traditional, EDR + mobile -> Endpoint,
+# research labs & personal blogs -> Research, advisories -> Gov / CERT.
 SOURCES: tuple[Source, ...] = (
-    # 综合类咨询 — general security news
-    Source("Hackread", "https://www.hackread.com/feed/", "General"),
-    Source("Security Affairs", "https://securityaffairs.co/wordpress/feed", "General"),
-    Source("WeLiveSecurity", "https://www.welivesecurity.com/en/rss/feed/", "General"),
-    Source("BadCyber", "https://badcyber.com/feed/", "General"),
-    Source("Citizen Lab", "https://citizenlab.ca/feed/", "General"),
-    Source("Google Security Blog", "https://security.googleblog.com/feeds/posts/default", "General"),
-    # 工控安全类 — ICS / OT
-    Source("Dragos Blog", "https://www.dragos.com/feed/", "ICS"),
-    # 终端安全类 — endpoint
-    Source("Cybereason", "https://www.cybereason.com/blog/rss.xml", "Endpoint"),
-    # 移动安全类 — mobile
-    Source("Lookout", "https://blog.lookout.com/feed", "Mobile"),
-    # 威胁情报类 — threat intelligence
-    Source("ThreatConnect", "https://threatconnect.com/blog/feed/", "Threat Intel"),
-    Source("JPCERT/CC", "https://blogs.jpcert.or.jp/en/feeds/posts/default", "Threat Intel"),
+    # 威胁情报类 — threat-news media & threat-intel firms
+    Source("Hackread", "https://hackread.com/feed/", "Threat Intel"),
+    Source("Security Affairs", "https://securityaffairs.com/feed", "Threat Intel"),
+    Source("Krebs on Security", "https://krebsonsecurity.com/feed/", "Threat Intel"),
+    Source("SecurityWeek", "https://www.securityweek.com/feed/", "Threat Intel"),
+    Source("Dark Reading", "https://www.darkreading.com/rss.xml", "Threat Intel"),
+    Source("The Hacker News", "https://thehackernews.com/feeds/posts/default", "Threat Intel"),
+    Source("BleepingComputer", "https://www.bleepingcomputer.com/feed/", "Threat Intel"),
+    Source("Schneier on Security", "https://www.schneier.com/feed/", "Threat Intel"),
+    Source("Ars Technica Security", "https://arstechnica.com/security/feed/", "Threat Intel"),
+    Source("Dataminr Blog", "https://www.dataminr.com/feed/", "Threat Intel"),  # ex-ThreatConnect
     Source("ClearSky", "https://www.clearskysec.com/feed/", "Threat Intel"),
-    Source("AlienVault Labs", "https://cybersecurity.att.com/blogs/labs-research/feed/", "Threat Intel"),
-    # 传统安全类 — traditional security vendors
+    Source("Unit 42", "https://unit42.paloaltonetworks.com/feed/", "Threat Intel"),
+    Source("The DFIR Report", "https://thedfirreport.com/feed/", "Threat Intel"),
+    Source("Exploit-DB", "https://www.exploit-db.com/rss.xml", "Threat Intel"),
+    Source("GreyNoise", "https://www.greynoise.io/blog/rss.xml", "Threat Intel"),
+    # 传统安全类 — established AV / platform vendors
     Source("Securelist", "https://securelist.com/feed/", "Traditional"),
     Source("Kaspersky Blog", "https://www.kaspersky.com/blog/feed/", "Traditional"),
     Source("Talos Intelligence", "https://blog.talosintelligence.com/rss/", "Traditional"),
     Source("Check Point Blog", "https://blog.checkpoint.com/feed/", "Traditional"),
-    Source("Bitdefender Labs", "https://labs.bitdefender.com/feed/", "Traditional"),
     Source("Heimdal Security", "https://heimdalsecurity.com/blog/feed/", "Traditional"),
     Source("Imperva Blog", "https://www.imperva.com/blog/feed/", "Traditional"),
+    Source("Rapid7 Blog", "https://www.rapid7.com/blog/rss/", "Traditional"),
+    Source("Qualys Blog", "https://blog.qualys.com/feed", "Traditional"),
+    Source("Tenable Blog", "https://feeds.feedburner.com/tenable/qaXL", "Traditional"),
+    Source("Malwarebytes Labs", "https://www.malwarebytes.com/blog/feed", "Traditional"),
+    Source("Microsoft Security Blog", "https://www.microsoft.com/en-us/security/blog/feed/", "Traditional"),
+    Source("AWS Security Blog", "https://aws.amazon.com/blogs/security/feed/", "Traditional"),
+    Source("Google Security Blog", "https://security.googleblog.com/feeds/posts/default", "Traditional"),
+    # 终端安全类 — endpoint & mobile vendors
+    Source("CrowdStrike Blog", "https://www.crowdstrike.com/blog/feed/", "Endpoint"),
+    Source("Sophos News", "https://www.sophos.com/en-gb/blog/feed", "Endpoint"),
+    Source("WeLiveSecurity", "https://www.welivesecurity.com/en/rss/feed/", "Endpoint"),
+    Source("NowSecure", "https://www.nowsecure.com/feed/", "Endpoint"),
+    Source("Android Explorations", "https://nelenkov.blogspot.com/feeds/posts/default", "Endpoint"),
+    # 研究类 — research labs & personal research blogs
+    Source("Project Zero", "https://projectzero.google/feed.xml", "Research"),
+    Source("Tencent Xuanwu Lab", "https://xlab.tencent.com/cn/feed/", "Research"),
+    Source("Tencent Keen Lab", "https://keenlab.tencent.com/zh/atom.xml", "Research"),
+    Source("Anquanke", "https://api.anquanke.com/data/v1/rss", "Research"),
+    Source("Xianzhi Community", "https://xz.aliyun.com/feed", "Research"),
+    Source("lcamtuf's things", "https://blog.coredump.cx/feed", "Research"),
+    Source("Claroty Team82", "https://claroty.com/team82/disclosure-dashboard/feed/atom", "Research"),
+    Source("Citizen Lab", "https://citizenlab.ca/feed/", "Research"),
+    # 政府与 CERT — government advisories & CERTs
+    Source("NCSC UK", "https://www.ncsc.gov.uk/api/1/services/v1/report-rss-feed.xml", "Gov / CERT"),
+    Source("CERT/CC Vul Notes", "https://www.kb.cert.org/vulfeed", "Gov / CERT"),
+    Source("Huawei PSIRT", "https://www.huawei.com/cn/rss-feeds/psirt/rss", "Gov / CERT"),
+)
+
+# Display order for the dashboard's chips, sources panel and category strip.
+GROUPS: tuple[str, ...] = (
+    "Traditional", "Research", "Gov / CERT", "Endpoint", "Threat Intel",
 )
 
 ALLOWED_HOSTS: frozenset[str] = frozenset(urlparse(s.url).hostname or "" for s in SOURCES)
@@ -157,6 +198,9 @@ def _bucket(title: str) -> str:
         "patch", "firewall", "password", "encrypt", "malicious", "attack",
         "leak", "trojan", "rootkit", "keylogger", "stalkerware", "espionage",
         "fraud", "scam", "incident response", "forensic",
+        # Chinese-language feeds (zer0yu Research / Gov / CERT sources)
+        "勒索", "漏洞", "攻击", "恶意", "后门", "钓鱼", "木马", "病毒",
+        "挖矿", "数据泄露", "安全通告", "情报",
     )
     business = (
         "market", "stocks", "revenue", "ipo", "merger", "acquisition",
@@ -169,11 +213,25 @@ def _bucket(title: str) -> str:
     return "Global"
 
 
+def _strip_www(host: str) -> str:
+    return host[4:] if host.startswith("www.") else host
+
+
 def fetch_url(url: str, client: httpx.Client) -> bytes:
-    """SSRF-guarded GET with manual redirect validation and a byte cap."""
+    """SSRF-guarded GET with manual redirect validation and a byte cap.
+
+    Redirect hops may keep the same site under a www/non-www variant of the
+    source's own host (publishers move between them often); anything else off
+    the allowlist is rejected. Every hop still passes assert_public_url.
+    """
+    source_host = _strip_www(urlparse(url).hostname or "")
     current = url
     for _ in range(MAX_REDIRECTS + 1):
-        if urlparse(current).hostname not in ALLOWED_HOSTS:
+        hop = urlparse(current).hostname or ""
+        # entry URL must be strictly allowlisted; redirect hops may keep the
+        # same site under a www/non-www variant of the source's own host
+        allowed = hop in ALLOWED_HOSTS or (current != url and _strip_www(hop) == source_host)
+        if not allowed:
             raise ValueError(f"host not in allowlist: {current}")
         assert_public_url(current)
         with client.stream("GET", current) as resp:
@@ -253,7 +311,7 @@ def fetch_all(timeout: float = FETCH_TIMEOUT) -> tuple[list[Article], list[FeedR
     }
     reports: list[FeedReport] = []
     with httpx.Client(headers=headers, timeout=timeout, follow_redirects=False) as client:
-        with futures.ThreadPoolExecutor(max_workers=8) as pool:
+        with futures.ThreadPoolExecutor(max_workers=12) as pool:
             reports = list(pool.map(lambda s: fetch_source(s, client), SOURCES))
     articles = [a for r in reports for a in r.articles]
     # newest first, de-duplicated by id

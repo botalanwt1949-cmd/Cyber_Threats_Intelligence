@@ -51,6 +51,12 @@ def test_sources_are_https_and_unique():
     assert len(hosts) == len(set(hosts))
 
 
+def test_sources_groups_known():
+    # every source's group must appear in the dashboard chip taxonomy,
+    # and GROUPS must not drift away from the roster
+    assert set(s.group for s in feeds.SOURCES) == set(feeds.GROUPS)
+
+
 # ---------- classification / parsing ----------
 
 def test_bucket_classification():
@@ -78,16 +84,6 @@ def test_parse_feed_extracts_articles():
 
 
 # ---------- simulation ----------
-
-def test_market_snapshot_deterministic():
-    now = time.time()
-    a = sim.market_snapshot(now)
-    b = sim.market_snapshot(now)
-    assert a == b
-    btc = next(q for q in a["crypto"] if q["symbol"] == "BTC")
-    assert btc["prefix"] == "$"
-    assert len(btc["spark"]) == sim.WINDOW_MINUTES
-
 
 def test_map_events_shape():
     events = sim.map_events(1_900_000_000, heat=1.0)
@@ -149,10 +145,12 @@ def test_api_threats_contract(client):
         assert len(lv["spark"]) == 24
 
 
-def test_api_markets_contract(client):
-    data = client.get("/api/markets").json()
-    assert {g["symbol"] for g in data["indices"]} == {"SPY", "QQQ", "DIA"}
+def test_api_vectors_contract(client):
+    data = client.get("/api/vectors").json()
     assert len(data["vectors"]) == 6
+    for v in data["vectors"]:
+        assert v["name"] in ("PHISHING", "RANSOMWARE", "DDOS", "MALWARE", "CVE", "APT")
+        assert len(v["spark"]) == 24
 
 
 def test_api_status_and_health(client):
@@ -162,8 +160,133 @@ def test_api_status_and_health(client):
     assert client.get("/api/healthz").json() == {"ok": True}
 
 
+def _seed_reports():
+    by_name = {s.name: s for s in feeds.SOURCES}
+    return [
+        feeds.FeedReport(by_name["Securelist"], True, 5),
+        feeds.FeedReport(by_name["CrowdStrike Blog"], False, 0, error="boom"),
+    ]
+
+
+@pytest.fixture()
+def client_reports(monkeypatch):
+    # the stub must return the seeded reports too: startup fires refresh_loop
+    # immediately, and refresh() overwrites state["reports"] with the stub's
+    # second element
+    monkeypatch.setattr(
+        main.feeds, "fetch_all", lambda *a, **k: (_seed_articles(), _seed_reports())
+    )
+    main.state["articles"] = _seed_articles()
+    main.state["reports"] = _seed_reports()
+    main.state["last_fetch"] = time.time()
+    main.state["ready"] = True
+    with TestClient(main.app) as c:
+        yield c
+
+
+def test_api_sources_contract(client):
+    data = client.get("/api/sources").json()
+    assert data["sources_total"] == len(feeds.SOURCES)
+    assert len(data["sources"]) == len(feeds.SOURCES)
+    for src in data["sources"]:
+        for key in ("name", "group", "ok", "count", "error", "articles"):
+            assert key in src
+    # group rollup must reconcile with the roster and keep the display order
+    assert [g["name"] for g in data["groups"]] == list(feeds.GROUPS)
+    assert sum(g["total"] for g in data["groups"]) == len(feeds.SOURCES)
+    assert data["sources_active"] == 0  # no sweep reports in this fixture
+
+
+def test_api_sources_reports_join(client_reports):
+    data = client_reports.get("/api/sources").json()
+    by_name = {s["name"]: s for s in data["sources"]}
+    assert by_name["Securelist"]["ok"] is True
+    assert by_name["Securelist"]["count"] == 5
+    assert by_name["Securelist"]["error"] == ""
+    assert by_name["CrowdStrike Blog"]["ok"] is False
+    assert by_name["CrowdStrike Blog"]["error"] == "boom"
+    assert by_name["Talos Intelligence"]["ok"] is None  # absent from this sweep
+    # Securelist articles come from the seeded corpus, not the report count
+    assert by_name["Securelist"]["articles"] == 6
+
+
 def test_bucket_security_vocabulary():
     assert feeds._bucket("A Critical SSH Password Bypass Hits musl-Based Linux") == "Cyber"
     assert feeds._bucket("Virtualization security: attack layers and misconfiguration") == "Cyber"
     assert feeds._bucket("How to navigate the SIEM correlation rule set") == "Cyber"
     assert feeds._bucket("Bring a tent, I've got the coffee: Lessons from it-sa") == "Global"
+
+
+def test_bucket_chinese_vocabulary():
+    # Chinese-language sources (zer0yu Research / Gov / CERT) must classify too
+    assert feeds._bucket("新型勒索软件针对制造业企业发起攻击") == "Cyber"
+    assert feeds._bucket("Xuanwu Lab 发布本周安全漏洞情报") == "Cyber"
+    assert feeds._bucket("团队发布年度技术总结文章") == "Global"
+
+
+def test_severity_chinese_words():
+    # 勒索(2.5) + 攻击(1.0) must clear the ransomware-level floor
+    assert main._score_severity("新型勒索软件攻击") >= 3.0
+
+
+# ---------- threat-map clone (Check Point style, /api/threatmap) ----------
+
+def test_daily_attack_total_deterministic_and_ticking():
+    ts = 1_900_000_000
+    assert sim.daily_attack_total(ts) == sim.daily_attack_total(ts)
+    day = sim.daily_attack_total(ts)
+    assert day["total"] > 0
+    assert 200 <= day["rate_per_min"] <= 400
+    assert sim.daily_attack_total(ts + 60)["total"] >= day["total"]
+
+
+def test_daily_series_shape():
+    series = sim.daily_series(1_900_000_000, days=7)
+    assert len(series) == 7
+    assert all(v > 10_000_000 for v in series)
+
+
+def test_attack_stream_shape_and_determinism():
+    ts = 1_900_000_000.0
+    s1, s2 = sim.attack_stream(ts), sim.attack_stream(ts)
+    assert s1 == s2
+    assert 1 <= len(s1) <= 20
+    for item in s1:
+        assert item["category"] in ("malware", "phishing", "exploit")
+        assert item["name"]
+        assert item["from"] != item["to"]
+        assert item["ts"] <= ts
+
+
+def test_country_ranking_shape():
+    rows = sim.country_ranking(1_900_000_000)
+    assert len(rows) == 5
+    assert len({r["name"] for r in rows}) == 5
+    rates = [r["rate"] for r in rows]
+    assert rates == sorted(rates, reverse=True)
+
+
+def test_legend_counts():
+    stream = sim.attack_stream(1_900_000_000)
+    counts = sim.legend_counts(stream)
+    assert set(counts) == {"malware", "phishing", "exploit"}
+    assert sum(counts.values()) == len(stream)
+
+
+def test_map_events_carry_category():
+    for e in sim.map_events(1_900_000_000, heat=1.0):
+        d = e.to_dict()
+        assert d["category"] in ("malware", "phishing", "exploit")
+        assert d["from_country"] and d["to_country"]
+
+
+def test_api_threatmap_contract(client):
+    data = client.get("/api/threatmap").json()
+    assert data["total_today"] > 0
+    assert len(data["daily_series"]) == 7
+    assert 1 <= len(data["attacks"]) <= 20
+    assert len(data["top_countries"]) == 5
+    assert set(data["legend"]) == {"malware", "phishing", "exploit"}
+    attack = data["attacks"][0]
+    for key in ("id", "name", "category", "from", "to", "ts"):
+        assert key in attack

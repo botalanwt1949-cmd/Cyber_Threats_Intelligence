@@ -1,14 +1,12 @@
-"""Deterministic market / threat-event simulation for the dashboard.
+"""Deterministic threat-event simulation for the dashboard.
 
-Nothing here calls the network. Prices are an Ornstein–Uhlenbeck-style walk
-seeded per (symbol, minute) so every client sees the same series and restarts
-are reproducible. Threat events are seeded per 10-second tick and weighted by
-live article severity counts passed in from the feed corpus.
+Nothing here calls the network. Threat events are seeded per 10-second tick
+and weighted by live article severity counts passed in from the feed corpus.
 
 The reference layout (STRATSIGHT AI demo) showed live ships/flights and
-markets; this clone's event layer is an honest simulation — the footer and
-README say so. Feed-driven panels (intel feed, threat levels, vectors) are
-real, derived from the aggregated RSS corpus.
+markets; this clone keeps only the honest event layer — the footer and
+README say so. Feed-driven panels (intel feed, threat levels, vectors,
+category cards) are real, derived from the aggregated RSS corpus.
 """
 
 from __future__ import annotations
@@ -25,68 +23,6 @@ def _u01(key: str) -> float:
     """Deterministic uniform [0,1) from a blake2b digest of the key."""
     digest = hashlib.blake2b(key.encode(), digest_size=8).digest()
     return struct.unpack("<Q", digest)[0] / 2**64
-
-
-# group, symbol, base price, display decimals, prefix
-MARKETS: tuple[tuple[str, str, float, int, str], ...] = (
-    ("indices", "SPY", 778.57, 2, ""),
-    ("indices", "QQQ", 751.27, 2, ""),
-    ("indices", "DIA", 516.11, 2, ""),
-    ("stocks", "AAPL", 336.64, 2, ""),
-    ("stocks", "GOOGL", 351.66, 2, ""),
-    ("stocks", "MSFT", 534.82, 2, ""),
-    ("security", "CRWD", 512.40, 2, ""),
-    ("security", "PANW", 402.70, 2, ""),
-    ("security", "FTNT", 96.42, 2, ""),
-    ("security", "ZS", 208.35, 2, ""),
-    ("security", "OKTA", 88.91, 2, ""),
-    ("crypto", "BTC", 83712.0, 0, "$"),
-    ("crypto", "ETH", 2547.0, 0, "$"),
-    ("crypto", "SOL", 111.66, 2, "$"),
-    ("crypto", "XRP", 1.40, 2, "$"),
-)
-
-WINDOW_MINUTES = 30  # sparkline depth
-OU_DECAY = 0.96
-OU_VOL = 0.006
-OU_STEPS = 240
-
-
-def _log_offset(symbol: str, minute_index: int) -> float:
-    """Bounded OU accumulation over a fixed window ending at minute_index."""
-    total = 0.0
-    for j in range(min(OU_STEPS, minute_index + 1)):
-        m = minute_index - j
-        noise = (_u01(f"{symbol}:{m}") * 2.0 - 1.0)
-        total += (OU_DECAY**j) * noise
-    return total * OU_VOL
-
-
-def _minute_index(now_ts: float) -> int:
-    return int((now_ts - EPOCH) // 60)
-
-
-def series(symbol: str, base: float, now_ts: float, points: int = WINDOW_MINUTES) -> list[float]:
-    mi = _minute_index(now_ts)
-    return [round(base * math.exp(_log_offset(symbol, mi - (points - 1 - i))), 6) for i in range(points)]
-
-
-def market_snapshot(now_ts: float) -> dict:
-    groups: dict[str, list[dict]] = {}
-    for group, symbol, base, decimals, prefix in MARKETS:
-        s = series(symbol, base, now_ts)
-        price, prev = s[-1], s[0]
-        change = (price / prev - 1.0) * 100.0 if prev else 0.0
-        groups.setdefault(group, []).append(
-            {
-                "symbol": symbol,
-                "price": round(price, decimals),
-                "prefix": prefix,
-                "change_pct": round(change, 2),
-                "spark": [round(v, decimals) for v in s],
-            }
-        )
-    return groups
 
 
 # ---- map threat events -----------------------------------------------------
@@ -140,6 +76,9 @@ class MapEvent:
             "to": {"name": name_b, "lon": lon_b, "lat": lat_b},
             "technique": self.technique,
             "severity": self.severity,
+            "category": TECH_CATEGORY.get(self.technique, "exploit"),
+            "from_country": _country(self.a)[0],
+            "to_country": _country(self.b)[0],
         }
 
 
@@ -161,6 +100,133 @@ def map_events(now_ts: float, heat: float = 1.0, window: int = 6) -> list[MapEve
         technique = _weighted_pick(_u01(f"t:{tick_i}:{i}"))
         events.append(MapEvent(f"{tick_i}-{i}", kind, a, b, technique, severity))
     return events
+
+
+# ---- Check Point-style threat-map layer ------------------------------------
+# Cloned vocabulary/behaviour from the reference threat map (REA capture,
+# 2026-11-06): per-second attack feed with CVE-style names, a ticking daily
+# attack counter, a top-targeted-countries ranking and a 3-category legend
+# (Malware / Phishing / Exploit). All values are deterministic simulations.
+
+COUNTRY_OF: tuple[tuple[str, str], ...] = (  # parallel to CITIES: (country, iso2)
+    ("United States", "US"), ("United States", "US"), ("Colombia", "CO"),
+    ("Brazil", "BR"), ("Mexico", "MX"), ("United Kingdom", "GB"),
+    ("France", "FR"), ("Germany", "DE"), ("Spain", "ES"), ("Italy", "IT"),
+    ("Sweden", "SE"), ("Ukraine", "UA"), ("Russia", "RU"), ("Türkiye", "TR"),
+    ("Israel", "IL"), ("United Arab Emirates", "AE"), ("Nigeria", "NG"),
+    ("Kenya", "KE"), ("South Africa", "ZA"), ("India", "IN"), ("China", "CN"),
+    ("Hong Kong", "HK"), ("Taiwan", "TW"), ("South Korea", "KR"), ("Japan", "JP"),
+    ("Singapore", "SG"), ("Indonesia", "ID"), ("Australia", "AU"),
+    ("New Zealand", "NZ"), ("Puerto Rico", "PR"), ("Canada", "CA"),
+    ("Netherlands", "NL"), ("Switzerland", "CH"), ("Poland", "PL"),
+    ("Vietnam", "VN"),
+)
+
+ATTACK_NAMES: tuple[str, ...] = (
+    "OpenSSL TLS Protocol Downgrade", "Suspicious Payloads Over HTTP Headers",
+    "Python Server-Side Template Injection", "Multiple SSH Initial Connection Requests",
+    "GIMP Integer Overflow (CVE-2025-54239)", "Microsoft Windows RDP Brute Force",
+    "Fortinet SSL VPN Heap Overflow", "Ivanti Connect Secure Auth Bypass",
+    "Apache Struts OGNL Injection", "Confluence OGNL Query Injection",
+    "Log4j JNDI Remote Code Execution", "SMBv1 EternalBlue Exploit Attempt",
+    "Exchange ProxyLogon SSRF Chain", "Citrix Bleed Session Token Leak",
+    "WordPress Plugin SQL Injection", "Redis Unauthenticated RCE Probe",
+    "DNS Amplification Reflection Flood", "Credential Stuffing Burst on OWA",
+    "Cobalt Strike Beacon C2 Callback", "Emotet Loader Download Attempt",
+    "Phishing Kit Credential Harvest", "Maldoc Macro Dropper Delivery",
+    "Kernel Driver Privilege Escalation", "Zerologon Netlogon Elevation",
+    "GoAnywhere MFT Deserialization", "PaperCut Print Server RCE Probe",
+)
+
+TECH_CATEGORY: dict[str, str] = {
+    "RANSOMWARE": "malware", "MALWARE C2": "malware", "EXFIL": "malware",
+    "PHISHING": "phishing",
+    "SCAN": "exploit", "BRUTE FORCE": "exploit", "DDOS": "exploit",
+    "ZERO-DAY": "exploit",
+}
+
+RANK_POOL: tuple[tuple[str, str], ...] = (  # (country, iso2) candidates for daily ranking
+    ("Ethiopia", "ET"), ("Nigeria", "NG"), ("Mongolia", "MN"), ("Uzbekistan", "UZ"),
+    ("Indonesia", "ID"), ("United States", "US"), ("India", "IN"), ("Brazil", "BR"),
+    ("United Kingdom", "GB"), ("Türkiye", "TR"), ("Vietnam", "VN"),
+    ("South Africa", "ZA"), ("Ukraine", "UA"), ("Spain", "ES"), ("Mexico", "MX"),
+)
+
+
+def _country(i: int) -> tuple[str, str]:
+    return COUNTRY_OF[i % len(COUNTRY_OF)]
+
+
+def daily_attack_total(now_ts: float) -> dict:
+    """Ticking 'attacks on this day' counter: deterministic per UTC day."""
+    day = int(now_ts // 86400)
+    base = 11_500_000 + int(_u01(f"day:{day}") * 2_500_000)      # 11.5M–14M per day
+    rate = 3.5 + _u01(f"rate:{day}") * 2.5                        # 3.5–6.0 attacks/s
+    sod = max(0.0, now_ts - day * 86400)
+    return {
+        "total": base + int(sod * rate),
+        "base": base,
+        "rate_per_min": round(rate * 60.0),
+    }
+
+
+def daily_series(now_ts: float, days: int = 7) -> list[int]:
+    """Recent daily totals, oldest → newest (today is partial)."""
+    day = int(now_ts // 86400)
+    out = []
+    for d in range(day - days + 1, day + 1):
+        base = 11_500_000 + int(_u01(f"day:{d}") * 2_500_000)
+        if d == day:
+            base += int(max(0.0, now_ts - d * 86400) * (3.5 + _u01(f"rate:{d}") * 2.5))
+        out.append(base)
+    return out
+
+
+def attack_stream(now_ts: float, count: int = 14) -> list[dict]:
+    """Per-second attack feed, newest first: CVE-style name + country route."""
+    sec = int(now_ts)
+    out = []
+    for i in range(count):
+        s = sec - i
+        name = ATTACK_NAMES[int(_u01(f"asn:{s}:{i}") * len(ATTACK_NAMES)) % len(ATTACK_NAMES)]
+        technique = _weighted_pick(_u01(f"ast:{s}:{i}"))
+        a = int(_u01(f"asa:{s}:{i}") * len(CITIES)) % len(CITIES)
+        b = int(_u01(f"asb:{s}:{i}") * len(CITIES)) % len(CITIES)
+        if a == b:
+            b = (b + 1) % len(CITIES)
+        out.append({
+            "id": f"atk-{s}-{i}",
+            "ts": float(s),
+            "name": name,
+            "technique": technique,
+            "category": TECH_CATEGORY.get(technique, "exploit"),
+            "from": _country(a)[0],
+            "to": _country(b)[0],
+        })
+    return out
+
+
+def country_ranking(now_ts: float, top: int = 5) -> list[dict]:
+    """Top targeted countries for the current UTC day (deterministic order)."""
+    day = int(now_ts // 86400)
+    scored = sorted(
+        RANK_POOL,
+        key=lambda c: (_u01(f"rank:{day}:{c[1]}"), c[1]),
+        reverse=True,
+    )[:top]
+    return [
+        {"name": name, "code": code, "rate": round(96.0 - i * 9.0
+         + _u01(f"rr:{day}:{code}") * 6.0, 1)}
+        for i, (name, code) in enumerate(scored)
+    ]
+
+
+def legend_counts(stream: list[dict]) -> dict[str, int]:
+    counts = {"malware": 0, "phishing": 0, "exploit": 0}
+    for item in stream:
+        cat = item.get("category", "exploit")
+        counts[cat] = counts.get(cat, 0) + 1
+    return counts
 
 
 def moon_phase(now_ts: float) -> dict:

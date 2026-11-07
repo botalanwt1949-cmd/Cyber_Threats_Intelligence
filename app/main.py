@@ -3,8 +3,9 @@
 Serves the static frontend and a small JSON API:
   /api/news    — aggregated RSS corpus (NewBee119/threat-intelligence sources)
   /api/threats — threat-level cards computed from the live corpus
-  /api/markets — simulated market snapshot (deterministic, see sim.py)
+  /api/vectors — 24h corpus keyword counts (real data, see vector_snapshot)
   /api/map-events — simulated global threat events for the map layer
+  /api/threatmap — Check Point-style counter, attack feed, top countries
   /api/status  — health/uptime counters for the footer bar
 """
 
@@ -37,6 +38,10 @@ SEVERITY_WORDS: dict[str, float] = {
     "breach": 2.0, "backdoor": 2.0, "data leak": 2.0, "cve-": 2.0, "apt": 2.0,
     "malware": 1.5, "phishing": 1.5, "exploit": 1.5, "botnet": 1.5, "ddos": 1.2,
     "hack": 1.0, "vulnerability": 1.0, "spyware": 1.5, "stealer": 1.5, "patch": 0.5,
+    # Chinese-language feeds (zer0yu Research / Gov / CERT sources)
+    "勒索": 2.5, "后门": 2.0, "数据泄露": 2.0,
+    "恶意": 1.5, "钓鱼": 1.5, "木马": 1.5, "病毒": 1.5, "挖矿": 1.5,
+    "漏洞": 1.0, "攻击": 1.0,
 }
 
 BUCKETS = ("Global", "Cyber", "Business")
@@ -193,20 +198,10 @@ async def api_threats() -> JSONResponse:
     return JSONResponse({"levels": build_threat_levels(), "generated_at": time.time()})
 
 
-@app.get("/api/markets")
-async def api_markets() -> JSONResponse:
+@app.get("/api/vectors")
+async def api_vectors() -> JSONResponse:
     now = time.time()
-    groups = sim.market_snapshot(now)
-    return JSONResponse(
-        {
-            "indices": groups.get("indices", []),
-            "stocks": groups.get("stocks", []),
-            "security": groups.get("security", []),
-            "crypto": groups.get("crypto", []),
-            "vectors": vector_snapshot(),
-            "generated_at": now,
-        }
-    )
+    return JSONResponse({"vectors": vector_snapshot(), "generated_at": now})
 
 
 @app.get("/api/map-events")
@@ -218,6 +213,82 @@ async def api_map_events() -> JSONResponse:
         {
             "events": [e.to_dict() for e in sim.map_events(now, heat)],
             "moon": sim.moon_phase(now),
+            "generated_at": now,
+        }
+    )
+
+
+@app.get("/api/threatmap")
+async def api_threatmap() -> JSONResponse:
+    """Check Point-style threat-map payload: ticking daily counter, per-second
+    attack feed, top targeted countries, daily series and legend counts.
+
+    The counter/feed/ranking are deterministic simulations (see sim.py);
+    the footer and README disclose this."""
+    now = time.time()
+    daily = sim.daily_attack_total(now)
+    stream = sim.attack_stream(now)
+    return JSONResponse(
+        {
+            "total_today": daily["total"],
+            "rate_per_min": daily["rate_per_min"],
+            "daily_series": sim.daily_series(now, 7),
+            "attacks": stream,
+            "top_countries": sim.country_ranking(now),
+            "legend": sim.legend_counts(stream),
+            "generated_at": now,
+        }
+    )
+
+
+@app.get("/api/sources")
+async def api_sources() -> JSONResponse:
+    """Per-source and per-group health for the dashboard's SOURCES panel.
+
+    Roster comes from feeds.SOURCES (stable even before the first sweep);
+    ok/count/error join from the latest sweep reports by source name. Group
+    article counts use the current corpus within a 24h window.
+    """
+    now = time.time()
+    reports = {r.source.name: r for r in state["reports"]}
+    articles_by_source: dict[str, int] = {}
+    for a in state["articles"]:
+        if now - a.published < 86400:
+            articles_by_source[a.source] = articles_by_source.get(a.source, 0) + 1
+
+    sources = []
+    for src in feeds.SOURCES:
+        rep = reports.get(src.name)
+        sources.append(
+            {
+                "name": src.name,
+                "group": src.group,
+                "ok": bool(rep.ok) if rep else None,
+                "count": rep.count if rep else 0,
+                "error": "" if (rep and rep.ok) else (rep.error if rep else ""),
+                "articles": articles_by_source.get(src.name, 0),
+            }
+        )
+
+    groups = []
+    for group in feeds.GROUPS:
+        members = [s for s in sources if s["group"] == group]
+        groups.append(
+            {
+                "name": group,
+                "active": sum(1 for m in members if m["ok"]),
+                "total": len(members),
+                "articles": sum(m["articles"] for m in members),
+            }
+        )
+
+    return JSONResponse(
+        {
+            "sources": sources,
+            "groups": groups,
+            "sources_active": sum(1 for s in sources if s["ok"]),
+            "sources_total": len(feeds.SOURCES),
+            "last_fetch": state["last_fetch"],
             "generated_at": now,
         }
     )
@@ -243,7 +314,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # the HTML shell must always revalidate: it carries the versioned asset URLs
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

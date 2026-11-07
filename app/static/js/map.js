@@ -1,7 +1,10 @@
-/* Global threat-activity map layer.
+/* Global threat-activity map layer — Check Point ThreatCloud-style clone.
    d3-geo over vendored Natural Earth 110m TopoJSON; equirectangular (FLAT),
    CSS-tilted 3D, HYBRID (graticule glow), and GLOBE (orthographic spin) views.
-   Threat events (arcs + pulses) arrive from /api/map-events. */
+   Threat events arrive from /api/map-events; the visual language (dot-matrix
+   continents, draw-on category arcs, impact rings, event labels, category
+   legend) is cloned from threatmap.checkpoint.com (REA capture, 2026-11-06):
+   Malware = red, Phishing = purple, Exploit = gold. */
 /* global d3, topojson */
 (function () {
   'use strict';
@@ -10,6 +13,7 @@
   const wrap = document.getElementById('map-wrap');
   const tip = document.getElementById('map-tip');
   const moonEl = document.getElementById('map-moon');
+  const legendEl = document.getElementById('map-legend');
 
   let width = 0, height = 0;
   let projection = null, path = null, land = null, borders = null;
@@ -18,12 +22,15 @@
   let globeRotation = 0;
   let lastEvents = [];
   let rafHandle = null;
+  let lastLegend = {};
 
-  const SEV_COLOR = ['#3fb8ea', '#ff9f1a', '#ff5d5d'];
+  const CAT_COLOR = { malware: '#ff4d5e', phishing: '#a24bff', exploit: '#f2b230' };
+  const CATS = ['malware', 'phishing', 'exploit'];
+  const catFilter = { malware: true, phishing: true, exploit: true };
   const SEV_NAME = ['LOW', 'MEDIUM', 'CRITICAL'];
 
   const gRoot = SVG.append('g').attr('class', 'map-root');
-  const gTerminator = gRoot.append('g');
+  const gBack = gRoot.append('g');
   const gCountries = gRoot.append('g');
   const gGraticule = gRoot.append('g');
   const gLabels = gRoot.append('g');
@@ -32,11 +39,33 @@
   const CITY_LABELS = ['Washington D.C.', 'São Paulo', 'London', 'Moscow', 'New Delhi',
     'Beijing', 'Tokyo', 'Sydney', 'Nairobi', 'Bogotá', 'San Juan', 'Dubai'];
 
+  addDefs();
+
+  function addDefs() {
+    // Halftone continent fill + faint background grid, matching the reference.
+    const defs = SVG.append('defs');
+    const dots = defs.append('pattern').attr('id', 'dotgrid')
+      .attr('width', 7).attr('height', 7).attr('patternUnits', 'userSpaceOnUse');
+    dots.append('circle').attr('cx', 2).attr('cy', 2).attr('r', 1.15)
+      .attr('fill', '#4c4553');
+    const grid = defs.append('pattern').attr('id', 'gridbg')
+      .attr('width', 56).attr('height', 56).attr('patternUnits', 'userSpaceOnUse');
+    grid.append('path').attr('d', 'M56 0H0V56').attr('fill', 'none')
+      .attr('stroke', 'rgba(130,120,150,0.07)').attr('stroke-width', 1);
+  }
+
+  function catOf(ev) {
+    return CAT_COLOR[ev.category] ? ev.category : 'exploit';
+  }
+
   function resize() {
     const rect = wrap.getBoundingClientRect();
     width = Math.max(320, rect.width);
     height = Math.max(240, rect.height);
     SVG.attr('viewBox', `0 0 ${width} ${height}`);
+    gBack.selectAll('rect').data([1]).join('rect')
+      .attr('class', 'grid-bg').attr('width', width).attr('height', height)
+      .attr('fill', 'url(#gridbg)');
     applyProjection();
   }
 
@@ -52,19 +81,9 @@
     if (land) {
       gCountries.selectAll('path.country').attr('d', path);
       gGraticule.selectAll('path').attr('d', path);
-      drawTerminator();
       drawLabels();
       redrawEvents();
     }
-  }
-
-  function drawTerminator() {
-    // Big decorative day-side dome, matching the reference's translucent ellipse.
-    const rx = width * 0.34, ry = height * 0.92;
-    gTerminator.selectAll('ellipse').data([1]).join('ellipse')
-      .attr('class', 'terminator')
-      .attr('cx', width * 0.42).attr('cy', height * 1.02)
-      .attr('rx', rx).attr('ry', ry);
   }
 
   function drawLabels() {
@@ -101,6 +120,7 @@
     gEvents.selectAll('*').remove();
     if (!arcsOn) { lastEvents.forEach(addMarker); return; }
     lastEvents.forEach((ev) => {
+      if (!catFilter[catOf(ev)]) return;
       if (ev.kind === 'arc') addArc(ev); else addPulse(ev);
       addMarker(ev);
     });
@@ -109,37 +129,63 @@
   function addArc(ev) {
     const d = arcPath(ev.from, ev.to);
     if (!d || !eventVisible(ev)) return;
-    gEvents.append('path').attr('class', `arc sev${ev.severity}`)
-      .attr('d', d).attr('opacity', 0.85)
+    const color = CAT_COLOR[catOf(ev)];
+    const p = gEvents.append('path')
+      .attr('class', `arc cat-${catOf(ev)}`)
+      .attr('d', d)
+      .attr('stroke', color)
       .on('mousemove', (mouseEvent) => showTip(mouseEvent, ev))
-      .on('mouseleave', hideTip)
-      .transition().duration(20000).ease(d3.easeLinear)
+      .on('mouseleave', hideTip);
+    let len = 600;
+    try { len = p.node().getTotalLength(); } catch (err) { /* detached node */ }
+    p.attr('fill', 'none')
+      .attr('stroke-dasharray', `${len} ${len}`)
+      .attr('stroke-dashoffset', len)
+      .attr('opacity', 0.9)
+      .transition().duration(1500).ease(d3.easeCubicOut)
+      .attr('stroke-dashoffset', 0)
+      .transition().delay(5000).duration(13500)
+      .attr('opacity', 0).remove();
+    addEventLabel(ev);
+  }
+
+  function addEventLabel(ev) {
+    const xy = projection([ev.to.lon, ev.to.lat]);
+    if (!xy || !eventVisible(ev)) return;
+    gEvents.append('text')
+      .attr('class', 'arc-label')
+      .attr('x', xy[0] + 9)
+      .attr('y', xy[1] + 3)
+      .text(ev.to_country || ev.to.name)
+      .transition().delay(6000).duration(13000)
       .attr('opacity', 0).remove();
   }
 
   function addPulse(ev) {
     const xy = projection([ev.to.lon, ev.to.lat]);
     if (!xy || !eventVisible(ev)) return;
+    const color = CAT_COLOR[catOf(ev)];
     const g = gEvents.append('g').attr('transform', `translate(${xy[0]},${xy[1]})`)
       .on('mousemove', (mouseEvent) => showTip(mouseEvent, ev))
       .on('mouseleave', hideTip);
-    g.append('circle').attr('r', 7).attr('class', `pulse-ring sev${ev.severity}`)
-      .attr('fill', 'none').attr('stroke-width', 1.4);
-    g.append('circle').attr('r', 2.2).attr('class', `sev${ev.severity} marker`);
+    g.append('circle').attr('r', 8).attr('fill', 'none')
+      .attr('stroke', color).attr('stroke-width', 1)
+      .attr('class', 'pulse-ring');
+    g.append('circle').attr('r', 2.4).attr('fill', color);
     g.transition().duration(20000).attr('opacity', 0).remove();
   }
 
   function addMarker(ev) {
     const xy = projection([ev.to.lon, ev.to.lat]);
     if (!xy || !eventVisible(ev)) return;
-    const size = ev.severity === 2 ? 4.5 : 3.4;
-    gEvents.append('path')
-      .attr('d', `M0,${-size} L${size * 0.85},${size * 0.6} L${-size * 0.85},${size * 0.6} Z`)
-      .attr('transform', `translate(${xy[0]},${xy[1]})`)
-      .attr('class', `sev${ev.severity} marker`).attr('opacity', 0.95)
+    const color = CAT_COLOR[catOf(ev)];
+    const g = gEvents.append('g').attr('transform', `translate(${xy[0]},${xy[1]})`)
       .on('mousemove', (mouseEvent) => showTip(mouseEvent, ev))
-      .on('mouseleave', hideTip)
-      .transition().duration(20000).attr('opacity', 0).remove();
+      .on('mouseleave', hideTip);
+    g.append('circle').attr('r', 4.6).attr('fill', 'none')
+      .attr('stroke', color).attr('stroke-width', 1);
+    g.append('circle').attr('r', 1.8).attr('fill', color);
+    g.transition().duration(20000).attr('opacity', 0).remove();
   }
 
   function showTip(evt, ev) {
@@ -147,8 +193,8 @@
     tip.classList.remove('hidden');
     tip.style.left = Math.min(evt.clientX - rect.left + 12, rect.width - 240) + 'px';
     tip.style.top = Math.max(evt.clientY - rect.top - 40, 4) + 'px';
-    tip.innerHTML = `<div class="t-tech">${ev.technique} · ${SEV_NAME[ev.severity]}</div>` +
-      `<div>${ev.from.name} → ${ev.to.name}</div>`;
+    tip.innerHTML = `<div class="t-tech">${(ev.category || '').toUpperCase()} · ${ev.technique} · ${SEV_NAME[ev.severity]}</div>` +
+      `<div>${ev.from_country || ev.from.name} → ${ev.to_country || ev.to.name}</div>`;
   }
 
   function hideTip() { tip.classList.add('hidden'); }
@@ -175,8 +221,8 @@
       land = topojson.feature(world, world.objects.countries);
       borders = topojson.mesh(world, world.objects.countries, (a, b) => a !== b);
       gCountries.append('path').datum(land).attr('class', 'country').attr('d', path);
-      gCountries.append('path').datum(borders).attr('class', 'country').attr('fill', 'none')
-        .attr('stroke', 'rgba(160,185,215,0.10)').attr('d', path);
+      gCountries.append('path').datum(borders).attr('class', 'country-border').attr('fill', 'none')
+        .attr('stroke', 'rgba(150,140,170,0.14)').attr('d', path);
       applyProjection();
     }).catch((err) => console.error('world load failed', err));
   }
@@ -190,14 +236,41 @@
   }
 
   function toggleArcs(on) { arcsOn = on; redrawEvents(); }
+
   function burst(payload) {
     lastEvents = (payload.events || []).concat(lastEvents).slice(0, 90);
     redrawEvents();
   }
 
+  function renderLegend() {
+    if (!legendEl) return;
+    legendEl.innerHTML = CATS.map((c) =>
+      `<button class="legend-chip${catFilter[c] ? '' : ' off'}" data-cat="${c}" title="Toggle ${c} attacks">` +
+      `<i class="legend-dot" style="--c:${CAT_COLOR[c]}"></i>` +
+      `${c.charAt(0).toUpperCase() + c.slice(1)}<b>${lastLegend[c] ?? 0}</b></button>`).join('');
+  }
+
+  function setLegend(counts) {
+    lastLegend = counts || {};
+    renderLegend();
+  }
+
+  function toggleCategory(cat) {
+    if (!(cat in catFilter)) return;
+    catFilter[cat] = !catFilter[cat];
+    renderLegend();
+    redrawEvents();
+  }
+
+  legendEl.addEventListener('click', (e) => {
+    const chip = e.target.closest('.legend-chip');
+    if (chip) toggleCategory(chip.dataset.cat);
+  });
+  renderLegend();
+
   window.addEventListener('resize', resize);
   resize();
   loadWorld();
 
-  window.CTIMap = { setEvents, setView, toggleArcs, burst };
+  window.CTIMap = { setEvents, setView, toggleArcs, burst, setLegend };
 })();
