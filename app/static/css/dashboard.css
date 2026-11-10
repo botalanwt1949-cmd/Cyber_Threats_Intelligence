@@ -275,9 +275,17 @@ body {
 
 /* legend over the map */
 #map-legend { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px;
-  display: flex; gap: 10px; z-index: 4; }
-.legend-chip { font-family: inherit; display: flex; align-items: center; gap: 8px;
-  font-size: 10.5px; letter-spacing: 1px; color: var(--white);
+  display: flex; gap: 10px; z-index: 4; pointer-events: none; }
+.legend-chip, .legend-note { pointer-events: auto; }
+#map-hint {
+  position: absolute; right: 10px; bottom: 10px; z-index: 4; pointer-events: none;
+  font-size: 8px; letter-spacing: 1.5px; color: var(--dim);
+  background: rgba(8, 18, 34, 0.72); border: 1px solid var(--panel-border);
+  padding: 3px 8px;
+}
+.legend-note { color: var(--dimmer); font-size: 8px; letter-spacing: 1.5px;
+  margin-right: 2px; border-right: 1px solid rgba(130, 120, 150, 0.35); padding-right: 6px; }
+.legend-chip { font-family: inherit; display: flex; align-items: center; gap: 8px;  font-size: 10.5px; letter-spacing: 1px; color: var(--white);
   background: rgba(10, 8, 16, 0.72); border: 1px solid rgba(130, 120, 150, 0.35);
   padding: 5px 12px; cursor: pointer; }
 .legend-chip b { color: var(--dim); font-weight: 400; }

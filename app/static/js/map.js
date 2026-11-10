@@ -48,6 +48,8 @@
       gZoom.attr('transform', ev.transform);
       // counter-scale strokes and labels so they stay crisp when zoomed in
       gZoom.style('--k', zoomK);
+      const hint = document.getElementById('map-hint');
+      if (hint) hint.style.opacity = '0';   // first interaction hides the hint
     });
   SVG.call(zoomBehavior);
 
@@ -78,8 +80,10 @@
     width = Math.max(320, rect.width);
     height = Math.max(240, rect.height);
     SVG.attr('viewBox', `0 0 ${width} ${height}`);
-    // keep panning bounded to the rendered map box
-    zoomBehavior.translateExtent([[0, 0], [width, height]]);
+    // allow panning immediately at 1x: 35% slack outside the fitted map, so
+    // drag feels alive instead of being locked until the first zoom-in
+    zoomBehavior.translateExtent(
+      [[-width * 0.35, -height * 0.35], [width * 1.35, height * 1.35]]);
     gBack.selectAll('rect').data([1]).join('rect')
       .attr('class', 'grid-bg').attr('width', width).attr('height', height)
       .attr('fill', 'url(#gridbg)');
@@ -109,7 +113,9 @@
     }
     path = d3.geoPath(projection);
     if (land) {
-      gCountries.selectAll('path.country').attr('d', path);
+      // re-project BOTH the land fill and the border mesh — the borders used
+      // to keep their flat-equirectangular d and float off the globe
+      gCountries.selectAll('path').attr('d', path);
       gGraticule.selectAll('path').attr('d', path);
       drawLabels();
       redrawEvents();
@@ -274,8 +280,10 @@
 
   function renderLegend() {
     if (!legendEl) return;
-    legendEl.innerHTML = CATS.map((c) =>
-      `<button class="legend-chip${catFilter[c] ? '' : ' off'}" data-cat="${c}" title="Toggle ${c} attacks">` +
+    legendEl.innerHTML =
+      `<span class="legend-note" title="Simulated attack events — see footer: MAP + ATTACKS: SIMULATED">SIM</span>` +
+      CATS.map((c) =>
+      `<button class="legend-chip${catFilter[c] ? '' : ' off'}" data-cat="${c}" title="Toggle simulated ${c} attacks">` +
       `<i class="legend-dot" style="--c:${CAT_COLOR[c]}"></i>` +
       `${c.charAt(0).toUpperCase() + c.slice(1)}<b>${lastLegend[c] ?? 0}</b></button>`).join('');
   }

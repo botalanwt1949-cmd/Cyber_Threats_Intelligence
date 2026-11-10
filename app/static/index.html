@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cyber Threats Intelligence — Command Desk</title>
   <meta name="description" content="Single-screen cyber threat intelligence dashboard: live RSS intel feed, global threat map, threat levels and per-category news cards." />
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=18" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=20" />
 </head>
 <body>
   <div id="app">
@@ -67,6 +67,7 @@
         <div id="map-wrap"><svg id="map" role="img" aria-label="Global threat activity map"></svg>
           <div id="map-tip" class="map-tip hidden"></div>
           <div id="map-legend" aria-label="Threat category legend"></div>
+          <div id="map-hint">SCROLL TO ZOOM · DRAG TO PAN</div>
         </div>
         <div id="catstrip"></div>
       </section>
@@ -78,7 +79,7 @@
           <ul class="targets-list" id="top-countries"></ul>
         </section>
         <section class="panel vectors-panel">
-          <h2 class="panel-title">THREAT VECTORS <span class="panel-count">24H CORPUS</span></h2>
+          <h2 class="panel-title">THREAT VECTORS <span class="panel-count">24H NEWS MENTIONS</span></h2>
           <ul class="vectors-list" id="vectors-list"></ul>
         </section>
         <section class="panel threats-panel">
@@ -100,7 +101,7 @@
 
   <script src="/static/vendor/d3.min.js"></script>
   <script src="/static/vendor/topojson-client.min.js"></script>
-  <script src="/static/js/map.js?v=19"></script>
+  <script src="/static/js/map.js?v=22"></script>
   <script src="/static/js/dashboard.js?v=20"></script>
 </body>
 </html>
