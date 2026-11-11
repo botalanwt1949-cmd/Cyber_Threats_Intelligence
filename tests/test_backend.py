@@ -1,7 +1,9 @@
-"""Unit tests: SSRF guard, feed parsing, simulation determinism, API contracts."""
+"""Unit tests: SSRF guard, feed parsing, simulation determinism, API contracts,
+IOC extraction, drawer endpoint, cache persistence."""
 
 from __future__ import annotations
 
+import json
 import socket
 import time
 from datetime import datetime, timezone
@@ -9,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app import feeds, main, sim
+from app import feeds, ioc, main, sim
 
 
 # ---------- SSRF guard ----------
@@ -294,3 +296,80 @@ def test_api_threatmap_contract(client):
     attack = data["attacks"][0]
     for key in ("id", "name", "category", "from", "to", "ts"):
         assert key in attack
+
+
+# ---------- IOC extraction (article drawer) ----------
+
+def test_extract_iocs_ips():
+    text = ("C2 traffic observed from 203.0.113.25 and 198.51.100.7; "
+            "internal scanner logged 10.0.0.5 and 0.0.0.0 plus 999.1.1.1.")
+    out = ioc.extract_iocs(text)
+    assert out["ips"] == ["10.0.0.5", "198.51.100.7", "203.0.113.25"]
+
+
+def test_extract_iocs_domains_exclude_publisher():
+    text = "Report at https://securelist.com/analysis and mirrors on www.evil-c2.example."
+    out = ioc.extract_iocs(text, exclude_domains=frozenset({"securelist.com"}))
+    assert "securelist.com" not in out["domains"]
+    assert "evil-c2.example" in out["domains"]
+    assert "w3.org" not in out["domains"]          # denylist
+
+
+def test_extract_iocs_cves_and_sha256():
+    text = ("Chains CVE-2025-12345 and cve-2024-00001 with sample "
+            "a3f1" + "b" * 56 + "c4d2.")
+    out = ioc.extract_iocs(text)
+    assert out["cves"] == ["CVE-2024-00001", "CVE-2025-12345"]
+    assert len(out["sha256"]) == 1 and out["sha256"][0].startswith("a3f1")
+
+
+def test_extract_iocs_cjk_text():
+    # Chinese copy must not crash and must still lift the embedded IOC
+    out = ioc.extract_iocs("利用该漏洞的恶意样本连接 45.33.32.156 进行数据回传。")
+    assert "45.33.32.156" in out["ips"]
+
+
+def test_extract_iocs_empty_text():
+    assert ioc.extract_iocs("") == {"ips": [], "domains": [], "cves": [], "sha256": []}
+
+
+def test_extract_iocs_per_kind_cap():
+    text = " ".join(f"host-{i}.evil-c2.example" for i in range(80))
+    out = ioc.extract_iocs(text)
+    assert len(out["domains"]) == ioc.MAX_PER_KIND
+
+
+# ---------- article endpoint (drawer) ----------
+
+def test_api_article_contract(client):
+    data = client.get("/api/article/a0").json()
+    assert data["id"] == "a0"
+    assert data["source"] == "Securelist"
+    for key in ("title", "url", "published", "summary", "iocs"):
+        assert key in data
+    assert set(data["iocs"]) == {"ips", "domains", "cves", "sha256"}
+
+
+def test_api_article_404(client):
+    assert client.get("/api/article/missing").status_code == 404
+
+
+# ---------- cache persistence (P0 ops defect) ----------
+
+def test_cache_save_and_load_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "CACHE_FILE", tmp_path / "cache.json")
+    arts = _seed_articles()
+    main.state["articles"] = arts
+    main.state["last_fetch"] = 1234.5
+    main._save_cache()
+    assert (tmp_path / "cache.json").exists()
+    # wipe in-memory state and prove the cache restores it
+    main.state["articles"] = []
+    main.state["ready"] = False
+    main._load_cache()
+    assert main.state["ready"] is True
+    assert len(main.state["articles"]) == len(arts)
+    assert main.state["last_fetch"] == 1234.5
+    payload = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+    assert payload["articles"][0]["id"] == "a0"

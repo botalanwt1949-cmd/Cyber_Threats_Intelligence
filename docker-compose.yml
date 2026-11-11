@@ -6,7 +6,14 @@ services:
     ports:
       - "127.0.0.1:8092:8090"   # loopback-only per fleet policy; 8090/8091 seized on host
     volumes:
-      - ./data:/app/data
+      # named volume (not a bind mount): on first use it inherits the image's
+      # /app/data ownership (cti, uid 10001). The old ./data bind mount was
+      # root-owned on the host, so every cache write failed with EACCES.
+      - cti-data:/app/data
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  cti-data:
+

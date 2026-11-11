@@ -118,7 +118,8 @@ SOURCES: tuple[Source, ...] = (
     Source("Talos Intelligence", "https://blog.talosintelligence.com/rss/", "Traditional"),
     Source("Check Point Blog", "https://blog.checkpoint.com/feed/", "Traditional"),
     Source("Heimdal Security", "https://heimdalsecurity.com/blog/feed/", "Traditional"),
-    Source("Imperva Blog", "https://www.imperva.com/blog/feed/", "Traditional"),
+    # Imperva Blog pruned 2026-11-11: serves a "Pardon Our Interruption"
+    # anti-bot page to non-browser user agents — by design, not a transient fault
     Source("Rapid7 Blog", "https://www.rapid7.com/blog/rss/", "Traditional"),
     Source("Qualys Blog", "https://blog.qualys.com/feed", "Traditional"),
     Source("Tenable Blog", "https://feeds.feedburner.com/tenable/qaXL", "Traditional"),

@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import feeds, sim
+from . import feeds, ioc, sim
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("cti.main")
@@ -102,6 +102,11 @@ def refresh() -> None:
     active = sum(1 for r in reports if r.ok)
     log.info("sweep done: %d articles from %d/%d sources",
              len(articles), active, len(feeds.SOURCES))
+    # failed sources must be visible in the logs, not just the UI dots —
+    # dead feeds otherwise rot silently inside SOURCES for months
+    for rep in reports:
+        if not rep.ok:
+            log.warning("source DOWN: %s — %s", rep.source.name, rep.error)
 
 
 async def refresh_loop() -> None:
@@ -304,6 +309,22 @@ async def api_sources() -> JSONResponse:
             "sources_total": len(feeds.SOURCES),
             "last_fetch": state["last_fetch"],
             "generated_at": now,
+        }
+    )
+
+
+@app.get("/api/article/{article_id}")
+async def api_article(article_id: str) -> JSONResponse:
+    """One article + server-extracted IOCs for the detail drawer."""
+    art = next((a for a in state["articles"] if a.id == article_id), None)
+    if art is None:
+        raise HTTPException(status_code=404, detail="article not found")
+    src = next((s for s in feeds.SOURCES if s.name == art.source), None)
+    exclude = frozenset({ioc.source_domain(src.url)}) if src else frozenset()
+    return JSONResponse(
+        {
+            **art.to_dict(),
+            "iocs": ioc.extract_iocs(f"{art.title}. {art.summary}", exclude),
         }
     )
 
