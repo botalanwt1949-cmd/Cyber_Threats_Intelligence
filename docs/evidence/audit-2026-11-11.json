@@ -1,0 +1,41 @@
+{
+  "audit": "full security audit follow-up (scheduled automation)",
+  "date": "2026-11-11",
+  "layers": {
+    "mimosa_static": {
+      "scans": 3,
+      "findings": 0,
+      "seals": [
+        "sha256:c1101e32d73df05e0282310cdd7bacdb7e4e2a019ed5322eafd66b8f7200436b",
+        "sha256:a2ee6b81e17219c5bb0e71274bc29869efb739e91a2e210889b9625aed93cc83",
+        "sha256:a8fb6755633272f6fb37743bb80025907eb11a8cf32f674e3c92e60bd2615df8"
+      ],
+      "dependency_coverage": "structural-absent: no dependencyScan phase in Mimosa schema for requirements.txt-only Python projects",
+      "callgraph": "partial (dynamic dispatch) \u2014 disclosed static-analysis limit"
+    },
+    "trivy_fs": {
+      "findings": 0,
+      "dependency_manifest_scanned": true,
+      "evidence": "requirements.txt present in scan report"
+    },
+    "semgrep_sast": {
+      "findings": 0
+    },
+    "gitleaks_secrets": {
+      "findings": 0
+    },
+    "hallucination_registry": {
+      "gate": "FAILED (6 HIGH)",
+      "triage": "all 6 HIGH PH-INSTALL-CMD traced to .claude/skills/gitnexus-cli/SKILL.md:10 (gitignored session scaffolding; prose tokenized as npm package names) \u2014 zero findings in the shipped 28-file tree",
+      "runtime_deps_on_pypi": {
+        "fastapi": 200,
+        "uvicorn": 200,
+        "httpx": 200,
+        "feedparser": 200,
+        "pytest": 200
+      },
+      "caveat": "2 MED + 2 INFO findings reported in scanner totals but not itemized in stdout"
+    }
+  },
+  "verdict": "PASS with documented caveats \u2014 static + dependency layers clean on the shipped tree; hallucination gate failure is scaffolding-prose false positives outside the repo"
+}
