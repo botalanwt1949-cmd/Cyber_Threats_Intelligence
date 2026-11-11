@@ -1,0 +1,10 @@
+{
+  "checks": {
+    "cyan on panel": 8.261868779583951,
+    "dim on panel": 5.93501289326965,
+    "dimmer on panel": 4.547853607942405,
+    "gold on title bar": 7.208321392639314,
+    "text on panel": 16.42999806321238
+  },
+  "theme": "dark"
+}

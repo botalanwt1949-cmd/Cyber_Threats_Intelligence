@@ -61,6 +61,40 @@ feed, top-country ranking and market tickers are **deterministic simulations**
 (seeded, reproducible) — the footer says
 `MAP + ATTACKS: SIMULATED · FEEDS: LIVE`.
 
+## UI design pass (2026-11-11, per the crew wiki `our-view-on-ui-stack`)
+
+The design-discipline review found and fixed real gaps; substrate stays
+vanilla (this host's compositor stalls rAF/CSS animation — documented in
+code — so React-based motion libs would stall here too):
+
+- **Design tokens**: every color/surface is a semantic custom property;
+  WCAG-AA-tuned text grays (dim 5.9:1, dimmer 4.5:1); `tabular-nums` on all
+  numerals; motion duration/easing tokens.
+- **Real light theme**: `[data-theme="light"]` token set replacing the old
+  `invert()` filter hack; persisted in localStorage, defaults from
+  `prefers-color-scheme`; the map layer recolors from the same vars.
+- **Motion core** (`motion.js`): one shared Web Worker clock (~30 Hz) drives
+  every animation — rollers, counter tweens, globe spin — because rAF never
+  fires in this WebView. `prefers-reduced-motion` parks all rollers and turns
+  the rolling lists into normal scrollable lists (`body.static-motion`).
+- **A11y**: keyboard-reachable feed rows (Enter → drawer, Shift+Enter →
+  source site), focus-visible rings, `aria-live` announcements for new
+  attacks and threat-badge changes, screen-reader-only live region.
+- **Article drawer**: native `<dialog>` with server-extracted IOC chips
+  (IPv4 / domain / CVE / SHA-256 via `app/ioc.py`, `GET /api/article/{id}`),
+  click-to-copy; threat-level cards toggle a feed category filter; honest
+  empty state; opt-in WebAudio tick (off by default).
+- **Responsive postures**: 1920 → 1366 → 1024 (stacked) → 768 → 390
+  (single-column panel tab strip FEED/MAP/MARKETS); `100dvh`; hover-stick
+  fix (touch never freezes rollers); 300-char titles line-clamped.
+- **Ops fixes**: cache moved to a named volume (the old root-owned bind
+  mount lost every sweep — 181 failures/96 h), failing sources now logged
+  by name, Imperva pruned (anti-bot page by design).
+
+All gates verified live: five viewports with zero horizontal overflow,
+AA contrast in both themes, reduced-motion static mode, drawer + keyboard,
+5000-article/300-char stress with zero JS errors (`docs/evidence/`).
+
 ## Run (Docker)
 
 ```bash
@@ -78,10 +112,10 @@ docker run --rm -v "$PWD:/src:ro" -w /src -e PYTHONDONTWRITEBYTECODE=1 \
                      python -m pytest tests/ -q -p no:cacheprovider"
 ```
 
-35 tests: SSRF guard (scheme/host/DNS checks), feed parsing & classification
+43 tests: SSRF guard (scheme/host/DNS checks), feed parsing & classification
 (English + Chinese keywords), source roster/group invariants, simulation
-determinism, threat-map clone contracts, and API contracts — all run
-inside a container.
+determinism, threat-map clone contracts, IOC extraction, drawer endpoint,
+cache persistence roundtrip, and API contracts — all run inside a container.
 
 ## Security posture
 
@@ -97,8 +131,8 @@ inside a container.
 ## API
 
 `/api/news` · `/api/threats` · `/api/markets` · `/api/map-events` ·
-`/api/threatmap` · `/api/status` · `/api/healthz` — plain JSON, no auth
-(loopback demo).
+`/api/threatmap` · `/api/sources` · `/api/article/{id}` · `/api/status` ·
+`/api/healthz` — plain JSON, no auth (loopback demo).
 
 ## Layout parity evidence
 
