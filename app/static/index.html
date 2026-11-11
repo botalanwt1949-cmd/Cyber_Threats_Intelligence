@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cyber Threats Intelligence — Command Desk</title>
   <meta name="description" content="Single-screen cyber threat intelligence dashboard: live RSS intel feed, global threat map, threat levels and per-category news cards." />
-  <link rel="stylesheet" href="/static/css/dashboard.css?v=20" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v=25" />
 </head>
 <body>
   <div id="app">
@@ -20,7 +20,7 @@
       </div>
     </header>
 
-    <main id="main">
+    <main id="main" data-tab="map">
       <aside id="left">
         <section class="panel attacks-panel">
           <h2 class="panel-title">ATTACKS <span class="panel-count" id="atk-rate">— /MIN</span></h2>
@@ -97,11 +97,32 @@
       <span class="status-item" id="st-note">MAP + ATTACKS: SIMULATED · FEEDS: LIVE</span>
       <span class="status-right">LAST FETCH: <b id="st-fetch">--:--:--</b></span>
     </footer>
+
+    <!-- single-column (≤767px) panel tab strip -->
+    <nav id="tabstrip" aria-label="Panel switcher">
+      <button class="tab-btn" data-tab="feed">FEED</button>
+      <button class="tab-btn active" data-tab="map">MAP</button>
+      <button class="tab-btn" data-tab="markets">MARKETS</button>
+    </nav>
   </div>
+
+  <!-- polite announcements for non-visual users (throttled from JS) -->
+  <div id="aria-live" class="sr-only" aria-live="polite"></div>
+
+  <!-- article detail drawer (P3): opened from feed/category/attack rows -->
+  <dialog id="article-drawer" aria-labelledby="drw-title-text">
+    <div class="drw-head">
+      <span class="drw-title" id="drw-title-text">ARTICLE</span>
+      <button class="drw-close" id="drw-close" aria-label="Close article">✕ ESC</button>
+    </div>
+    <div class="drw-body" id="drw-body"></div>
+  </dialog>
 
   <script src="/static/vendor/d3.min.js"></script>
   <script src="/static/vendor/topojson-client.min.js"></script>
-  <script src="/static/js/map.js?v=22"></script>
-  <script src="/static/js/dashboard.js?v=20"></script>
+  <script src="/static/js/motion.js?v=1"></script>
+  <script src="/static/js/map.js?v=23"></script>
+  <script src="/static/js/dashboard.js?v=21"></script>
+  <script src="/static/js/drawer.js?v=1"></script>
 </body>
 </html>

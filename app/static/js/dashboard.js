@@ -1,11 +1,17 @@
-/* Dashboard controller: polls the API, renders panels, drives the map layer. */
-/* global CTIMap */
+/* Dashboard controller: polls the API, renders panels, drives the map layer.
+   Motion discipline: every animated thing runs on the shared CTIMotion worker
+   clock (motion.js) because this host stalls CSS transforms and never fires
+   rAF; reduced-motion parks the rollers and turns the rolling lists into
+   plain scrollable lists. Wiki-stack rules applied: tabular numerals,
+   token-driven theme, aria-live announcements, keyboard-reachable rows. */
+/* global CTIMap, CTIMotion, CTIDrawer */
 (function () {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const reduced = () => window.CTIMotion && CTIMotion.reduced;
 
   const ZONES = [
     { lbl: 'UTC', tz: 'UTC' },
@@ -48,27 +54,85 @@
       `${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`).join(' ');
   }
 
+  // ---------- a11y announcements (throttled) + audio tick ----------
+  let lastAnnounce = 0;
+  function announce(msg) {
+    const now = performance.now();
+    if (now - lastAnnounce < 4000) return;
+    lastAnnounce = now;
+    const el = $('aria-live');
+    if (el) el.textContent = msg;
+  }
+
+  // soft WebAudio tick for new attacks — opt-in (off by default, persisted),
+  // never plays under reduced motion, rate-capped to one per 2 s
+  let audioCtx = null;
+  let lastTickAt = 0;
+  function playTick() {
+    if ($('btn-snd').getAttribute('aria-pressed') !== 'true') return;
+    if (reduced()) return;
+    const now = performance.now();
+    if (now - lastTickAt < 2000) return;
+    lastTickAt = now;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.06);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.07);
+    } catch (e) { /* audio unavailable — stay silent */ }
+  }
+
   // ---------- header ----------
   function renderHeaderClocks() {
     $('hdr-clocks').innerHTML = ZONES.map((z) =>
       `<div class="hdr-clock"><span class="lbl">${z.lbl}</span><span class="val">${fmtClock(z.tz)}</span></div>`
     ).join('');
   }
-  // ---------- main-thread rollers ----------
-  // This host's GPU compositor stalls CSS transform animations AND gates
-  // requestAnimationFrame (vsync never fires), so the ticker and the
-  // intel-feed roll are driven from a setInterval loop instead. Speed is
-  // dt-based, so timer jitter only pauses the roll, never distorts it.
+
+  // ---------- theme (real token theme, persisted; no filter hacks) ----------
+  function initTheme() {
+    const stored = localStorage.getItem('cti-theme');
+    const prefersLight = window.matchMedia
+      && window.matchMedia('(prefers-color-scheme: light)').matches;
+    applyTheme(stored || (prefersLight ? 'light' : 'dark'));
+  }
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    $('btn-theme').setAttribute('aria-pressed', String(theme === 'light'));
+    $('btn-theme').textContent = theme === 'light' ? '☀' : '◐';
+    localStorage.setItem('cti-theme', theme);
+    // the map recolors its SVG paint from the CSS custom properties
+    document.dispatchEvent(new CustomEvent('cti-theme', { detail: { theme } }));
+  }
+
+  // ---------- rollers (worker-clock driven; see motion.js) ----------
   const rollers = new Map();
+  const canHover = window.matchMedia
+    ? window.matchMedia('(hover: hover)').matches : true;
   function registerRoller(el, axis, speed, mode = 'loop', onWrap = null) {
     const r = { axis, speed, mode, onWrap, half: 0, offset: 0, paused: false };
     rollers.set(el, r);
-    el.addEventListener('pointerenter', () => { r.paused = true; });
-    el.addEventListener('pointerleave', () => { r.paused = false; });
+    if (canHover) {
+      // hover pause only for real pointers — on touch, pointerenter fires and
+      // never leaves, which used to freeze the roll permanently (hover-stick)
+      el.addEventListener('pointerenter', () => { r.paused = true; });
+      el.addEventListener('pointerleave', () => { r.paused = false; });
+    } else {
+      el.addEventListener('pointerdown', () => { r.paused = true; });
+      const release = () => { r.paused = false; };
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', release);
+      el.addEventListener('pointerleave', release);
+    }
   }
   function resetRoller(el, period) {
     const r = rollers.get(el);
-    if (!r) return;
+    if (!r || reduced()) { stopRoller(el); return; }
     r.offset = 0;
     // loop length = one copy of the content; for a duplicated track that is
     // half the scroll size, for an N-copies track pass the period explicitly
@@ -84,13 +148,11 @@
     r.half = 0;
     el.style.transform = '';
   }
-  let rollLast = 0;
-  function rollStep() {
-    const now = performance.now();
-    const dt = Math.min(2000, rollLast ? now - rollLast : 0);
-    rollLast = now;
+  function rollStep(dt) {
+    // dt comes from the shared CTIMotion worker clock — the compositor stalls
+    // CSS transform animations here and rAF never fires
     for (const [el, r] of rollers) {
-      if (r.paused || !r.half) continue;
+      if (r.paused || !r.half || reduced()) continue;
       r.offset += (r.speed * dt) / 1000;
       if (r.offset >= r.half) {
         r.offset -= r.half;
@@ -104,21 +166,6 @@
         : `translateX(${-r.offset.toFixed(1)}px)`;
     }
   }
-  // This environment: compositor stalls CSS animations, rAF never fires and
-  // page timers are throttled to 1 Hz — but Web Worker timers run unthrottled
-  // (~30 Hz verified), so the roll ticks arrive from a Blob worker. If Worker
-  // is unavailable, fall back to the (chunky) 1 Hz page timer.
-  function startRollClock() {
-    try {
-      const src = 'setInterval(() => postMessage(0), 33);';
-      const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-      const w = new Worker(url);
-      w.onmessage = rollStep;
-      w.onerror = () => { w.terminate(); setInterval(rollStep, 1000); };
-    } catch (e) {
-      setInterval(rollStep, 1000);
-    }
-  }
 
   let tickerItems = [];
   function renderTicker() {
@@ -127,49 +174,66 @@
       `<span class="tick-text">[<span class="tick-time">${fmtTime(a.published)}</span>] ${esc(a.title)} <span class="tick-src">— ${esc(a.source)}</span></span>`
     ).join(' &nbsp;·&nbsp; ');
     const el = $('ticker');
-    el.innerHTML = line + ' &nbsp;·&nbsp; ' + line; // duplicated for seamless loop
+    // duplicated for a seamless loop; single copy under reduced motion
+    el.innerHTML = reduced() ? line : line + ' &nbsp;·&nbsp; ' + line;
     resetRoller(el);
   }
 
   // ---------- left: news ----------
   let knownIds = new Set();
   let activeGroup = 'ALL';
+  let activeCategory = null;      // threat-level card click → category filter
   let lastNews = null;
   let lastListSig = '';
   let lastSourcesSig = '';
   let sourcesState = { sources: [], groups: [] };
+
   function feedArticles(payload) {
-    return activeGroup === 'ALL'
-      ? payload.articles
-      : payload.articles.filter((a) => a.source_group === activeGroup);
+    let pool = payload.articles;
+    if (activeGroup !== 'ALL') pool = pool.filter((a) => a.source_group === activeGroup);
+    if (activeCategory) pool = pool.filter((a) => a.category === activeCategory);
+    return pool;
+  }
+  function newsRow(a, staggerMs) {
+    const t = new Date(a.published * 1000);
+    const style = staggerMs ? ` style="--stagger:${staggerMs}ms"` : '';
+    return `<li class="news-item${staggerMs ? ' fresh' : ''}" role="button" tabindex="0"` +
+      ` data-id="${esc(a.id)}" data-url="${esc(a.url)}"` +
+      ` aria-label="${esc(a.title)} — open article"${style}>` +
+      `<div class="news-meta"><span class="news-cat">${esc(a.category.toUpperCase())}</span>` +
+      `<span class="news-time">${t.toLocaleTimeString('en-GB', { hour12: false })}</span></div>` +
+      `<div class="news-title">${esc(a.title)}</div>` +
+      `<div class="news-src">${esc(a.source)} · ${esc(a.source_group)}</div></li>`;
   }
   function renderNews(payload, force = false) {
     lastNews = payload;
     const pool = feedArticles(payload);
     $('feed-count').textContent =
-      `${activeGroup === 'ALL' ? (payload.articles_today || payload.articles.length) : pool.length} ARTICLES`;
+      `${activeGroup === 'ALL' && !activeCategory
+        ? (payload.articles_today || payload.articles.length)
+        : pool.length} ARTICLES`;
     const fresh = payload.articles.filter((a) => !knownIds.has(a.id)).slice(0, 3).map((a) => a.id);
     payload.articles.forEach((a) => knownIds.add(a.id));
     const items = pool.slice(0, 40);
     // re-render (and restart the roll) only when the visible content changed —
     // unchanged polls must not reset the rolling animation
-    const sig = items.map((a) => a.id).join(',');
+    const sig = `${activeGroup}|${activeCategory}|` + items.map((a) => a.id).join(',');
     if (force || sig !== lastListSig) {
       lastListSig = sig;
-      const html = items.map((a) => {
-        const t = new Date(a.published * 1000);
-        return `<li class="news-item ${fresh.includes(a.id) ? 'fresh' : ''}" data-url="${esc(a.url)}">` +
-          `<div class="news-meta"><span class="news-cat">${esc(a.category.toUpperCase())}</span>` +
-          `<span class="news-time">${t.toLocaleTimeString('en-GB', { hour12: false })}</span></div>` +
-          `<div class="news-title">${esc(a.title)}</div>` +
-          `<div class="news-src">${esc(a.source)} · ${esc(a.source_group)}</div></li>`;
-      }).join('');
       const list = $('news-list');
-      // duplicate the track; the roller wraps at half its height → seamless loop
-      list.innerHTML = html + html;
-      const overflows = list.scrollHeight / 2 > list.parentElement.clientHeight + 8;
-      if (overflows) resetRoller(list);
-      else stopRoller(list);
+      if (!items.length) {
+        list.innerHTML = '<li class="news-empty">— no articles for this filter —</li>';
+        stopRoller(list);
+      } else {
+        const html = items.map((a) =>
+          newsRow(a, fresh.includes(a.id) ? fresh.indexOf(a.id) * 150 : 0)).join('');
+        // duplicate the track for a seamless loop; single copy under reduced
+        // motion (the duplicate would be visible while scrolling)
+        list.innerHTML = reduced() ? html : html + html;
+        const overflows = list.scrollHeight / 2 > list.parentElement.clientHeight + 8;
+        if (overflows) resetRoller(list);
+        else stopRoller(list);
+      }
     }
     tickerItems = payload.articles.slice(0, 6);
     renderTicker();
@@ -198,7 +262,13 @@
       track: document.getElementById(trackId), sig: '',
     };
   }
-  function renderCatStrip() {
+  function catItem(a) {
+    return `<div class="cat-item" role="button" tabindex="0" data-id="${esc(a.id)}"` +
+      ` aria-label="${esc(a.title)} — open article">` +
+      `<div class="cat-headline" title="${esc(a.title)}">${esc(a.title)}</div>` +
+      `<div class="cat-src">${esc(a.source)} · ${ageLabel(Date.now() / 1000 - a.published)}</div></div>`;
+  }
+  function renderCatStrip(force = false) {
     const groups = sourcesState.groups || [];
     if (!groups.length) return;
     // build the strip shells once so track elements keep their roller
@@ -236,6 +306,7 @@
     for (const g of groups) {
       const ui = catCards.get(g.name);
       if (!ui) continue;
+      if (force) ui.sig = '';
       if (ui.dot) ui.dot.className = `chip-dot ${chipDot(g.active, g.total)}`;
       ui.n.textContent = `${g.articles}/24h`;
       if (ui.h) ui.h.textContent = `${g.active}/${g.total}`;
@@ -243,43 +314,53 @@
       const sig = items.map((a) => a.id).join(',');
       if (sig === ui.sig) continue;   // unchanged → keep rolling
       ui.sig = sig;
-      const item = (a) =>
-        `<div class="cat-item"><div class="cat-headline" title="${esc(a.title)}">${esc(a.title)}</div>` +
-        `<div class="cat-src">${esc(a.source)} · ${ageLabel(Date.now() / 1000 - a.published)}</div></div>`;
       if (!items.length) {
         ui.track.innerHTML = '<div class="cat-headline dim">— no articles in the current corpus —</div>';
         stopRoller(ui.track);
         continue;
       }
-      const html = items.map(item).join('');
-      ui.track.innerHTML = html;
+      const html = items.map(catItem).join('');
       // always roll when several headlines exist: repeat the track enough
       // times that the loop never exposes a gap, even in tall cards
-      if (items.length > 1) {
+      if (items.length > 1 && !reduced()) {
+        ui.track.innerHTML = html;
         const contentH = Math.max(60, ui.track.scrollHeight);
         const viewH = ui.track.parentElement.clientHeight;
         const copies = Math.max(2, Math.ceil((viewH + contentH) / contentH) + 1);
         ui.track.innerHTML = html.repeat(copies);
         resetRoller(ui.track, contentH);
       } else {
+        ui.track.innerHTML = html;
         stopRoller(ui.track);
       }
     }
   }
+
+  const prevBadges = new Map();
   function renderThreats(payload) {
+    let badgeMsg = null;
     $('threat-levels').innerHTML = (payload.levels || []).map((lv) => {
       const cls = lv.badge === 'HIGH' ? '' : `lv-${lv.badge.toLowerCase()}`;
       const delta = lv.delta_pct >= 0 ? `+${lv.delta_pct}%` : `${lv.delta_pct}%`;
-      return `<div class="tl-card ${cls}">` +
+      if (prevBadges.has(lv.name) && prevBadges.get(lv.name) !== lv.badge) {
+        badgeMsg = `${lv.name} threat level ${lv.badge}`;
+      }
+      prevBadges.set(lv.name, lv.badge);
+      // the card is a filter toggle: click → intel feed filtered to this bucket
+      const active = activeCategory === lv.name;
+      return `<div class="tl-card ${cls}" role="button" tabindex="0"` +
+        ` data-category="${esc(lv.name)}" aria-pressed="${active}"` +
+        ` aria-label="${esc(lv.name)} threat level ${esc(lv.badge)} — filter feed">` +
         `<div class="tl-head"><span class="tl-name">${esc(lv.name)}</span><span class="tl-badge">${esc(lv.badge)}</span></div>` +
         `<span class="tl-pill">AI · ${esc(lv.badge)}</span>` +
         `<div class="tl-nums"><b>${lv.count_24h}</b> / 24h &nbsp; <b>${delta}</b></div>` +
         `<svg class="tl-spark" viewBox="0 0 240 30" preserveAspectRatio="none">` +
         `<polyline fill="none" stroke="#ff9f1a" stroke-width="1.6" points="${sparkPoints(lv.spark, 240, 30)}"/></svg>` +
-        (lv.latest ? `<div class="tl-latest"><span>${esc(lv.latest.title.slice(0, 90))}</span>` +
+        (lv.latest ? `<div class="tl-latest"><span class="txt" title="${esc(lv.latest.title)}">${esc(lv.latest.title)}</span>` +
           `<span class="age">${ageLabel(lv.latest.age_s)}</span></div>` : '') +
         '</div>';
     }).join('');
+    if (badgeMsg) announce(badgeMsg);
   }
 
   // ---------- sources panel + feed group chips ----------
@@ -288,8 +369,8 @@
     if (active > 0) return 'part';
     return 'bad';
   }
-  function chipHtml(key, active, total, articles) {
-    return `<button class="feed-chip ${activeGroup === key ? 'active' : ''}" data-group="${esc(key)}">` +
+  function chipHtml(key, active, total) {
+    return `<button class="feed-chip ${activeGroup === key && !activeCategory ? 'active' : ''}" data-group="${esc(key)}">` +
       `<i class="chip-dot ${chipDot(active, total)}"></i>${esc(key)}` +
       `<span class="chip-n">${active}/${total}</span></button>`;
   }
@@ -299,15 +380,15 @@
     const act = groups.reduce((n, g) => n + g.active, 0);
     const tot = groups.reduce((n, g) => n + g.total, 0);
     $('feed-chips').innerHTML =
-      chipHtml('ALL', act, tot, 0) + groups.map((g) => chipHtml(g.name, g.active, g.total, g.articles)).join('');
+      chipHtml('ALL', act, tot) + groups.map((g) => chipHtml(g.name, g.active, g.total)).join('');
   }
-  function renderSources(payload) {
+  function renderSources(payload, force = false) {
     sourcesState = payload;
     $('sources-count').textContent = `${payload.sources_active ?? 0}/${payload.sources_total ?? 0} ACTIVE`;
     const cells = payload.sources || [];
     // re-render (and restart the roll) only when health actually changed
     const sig = cells.map((s) => `${s.ok}|${s.articles}`).join(',');
-    if (sig !== lastSourcesSig) {
+    if (force || sig !== lastSourcesSig) {
       lastSourcesSig = sig;
       const html = cells.map((s) => {
         const cls = s.ok === true ? 'ok' : (s.ok === false ? 'bad' : 'idle');
@@ -317,8 +398,7 @@
           `<span class="src-n">${s.articles ? s.articles : ''}</span></div>`;
       }).join('');
       const grid = $('sources-grid');
-      // duplicate the track for a seamless loop (44 sources = even row pairs)
-      grid.innerHTML = html + html;
+      grid.innerHTML = reduced() ? html : html + html;
       resetRoller(grid);
     }
     renderChips();
@@ -326,33 +406,33 @@
   }
 
   // ---------- threat map clone (Check Point style) ----------
-  let shownTotal = null;
   function tweenCounter(target) {
+    // eased on the shared worker clock via CTIMotion.tween (motion.js) —
+    // rAF never fires on this host; reduced-motion jumps straight to the value
     const el = $('tm-counter');
     if (!el) return;
-    const from = shownTotal === null ? Math.max(0, target - 40000) : shownTotal;
-    shownTotal = target;
-    const t0 = performance.now(), dur = 900;
-    function step(t) {
-      const k = Math.min(1, (t - t0) / dur);
-      const eased = 1 - Math.pow(1 - k, 3);
-      el.textContent = Math.round(from + (target - from) * eased).toLocaleString('en-US');
-      if (k < 1) requestAnimationFrame(step);
-    }
-    requestAnimationFrame(step);
+    tweenCounter._shown = tweenCounter._shown === undefined ? null : tweenCounter._shown;
+    const from = tweenCounter._shown === null ? Math.max(0, target - 40000) : tweenCounter._shown;
+    tweenCounter._shown = target;
+    CTIMotion.tween({
+      from, to: target, duration: 900, ease: 'cubicOut',
+      onUpdate: (v) => { el.textContent = Math.round(v).toLocaleString('en-US'); },
+    });
   }
 
   const seenAttacks = new Set();
   const attacksState = [];  // newest first, capped — the rolling window
-  function atkRow(a) {
-    return `<li class="atk-item fresh"><i class="atk-ring cat-${esc(a.category)}"></i>` +
+  function atkRow(a, staggerMs) {
+    return `<li class="atk-item${staggerMs ? ' fresh' : ''}"${staggerMs ? ` style="--stagger:${staggerMs}ms"` : ''}>` +
+      `<i class="atk-ring cat-${esc(a.category)}"></i>` +
       `<div class="atk-body"><div class="atk-name" title="${esc(a.name)}">${esc(a.name)}</div>` +
       `<div class="atk-meta"><span class="atk-time">${fmtTime(a.ts)}</span>` +
       `<span class="atk-route">${esc(a.from)} <span class="arr">➜</span> ${esc(a.to)}</span></div></div></li>`;
   }
   function renderAttacksTrack() {
     const list = $('attack-list');
-    list.innerHTML = attacksState.map(atkRow).join('');
+    const html = attacksState.map((a) => atkRow(a, 0)).join('');
+    list.innerHTML = reduced() ? html : html + html;
     resetRoller(list);
   }
   function renderAttacks(payload) {
@@ -367,6 +447,8 @@
       // refreshes at each roller wrap (onWrap), so the roll never restarts
       // just because new attacks streamed in
       if (!rollers.get($('attack-list')).half) renderAttacksTrack();
+      announce(`${fresh.length} new attack${fresh.length > 1 ? 's' : ''}`);
+      playTick();
     }
   }
   function renderTargets(payload) {
@@ -414,13 +496,32 @@
   async function pollNews() { try { renderNews(await getJSON('/api/news')); } catch (e) { console.warn(e); } }
   async function pollSources() { try { renderSources(await getJSON('/api/sources')); } catch (e) { console.warn(e); } }
   async function pollVectors() { try { renderVectors(await getJSON('/api/vectors')); } catch (e) { console.warn(e); } }
-  async function pollThreats() { try { renderThreats(await getJSON('/api/threats')); } catch (e) { console.warn(e); } }
   async function pollStatus() { try { renderStatus(await getJSON('/api/status')); } catch (e) { console.warn(e); } }
   async function pollEvents() {
     try { CTIMap.setEvents(await getJSON('/api/map-events')); } catch (e) { console.warn(e); }
   }
+  // threats keeps its last payload so threat-card clicks can re-render
+  // aria-pressed state without a refetch
+  let threatsLast = null;
+  async function pollThreats() {
+    try {
+      const payload = await getJSON('/api/threats');
+      threatsLast = payload;
+      renderThreats(payload);
+    } catch (e) { console.warn(e); }
+  }
+  function renderThreatsLast() {
+    if (threatsLast) renderThreats(threatsLast);
+  }
 
   // ---------- controls ----------
+  function setFilter({ group, category }) {
+    if (group !== undefined) activeGroup = group;
+    if (category !== undefined) activeCategory = category;
+    renderChips();
+    if (lastNews) renderNews(lastNews, true);
+  }
+
   document.querySelectorAll('.map-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.map-tab').forEach((b) => b.classList.remove('active'));
@@ -439,23 +540,74 @@
   $('zoom-in').addEventListener('click', () => CTIMap.zoomIn());
   $('zoom-out').addEventListener('click', () => CTIMap.zoomOut());
   $('zoom-reset').addEventListener('click', () => CTIMap.zoomReset());
+
   $('btn-snd').addEventListener('click', (e) => {
-    const muted = e.currentTarget.textContent === '🔇';
-    e.currentTarget.textContent = muted ? '🔊' : '🔇';
+    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+    e.currentTarget.textContent = on ? '🔊' : '🔇';
+    localStorage.setItem('cti-sound', on ? '1' : '0');
+    if (on) playTick();
   });
+
   $('btn-theme').addEventListener('click', () => {
-    document.body.style.filter = document.body.style.filter ? '' : 'invert(0.92) hue-rotate(180deg)';
+    applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
   });
+
+  // feed rows: click/Enter opens the article drawer, Shift+click/Shift+Enter
+  // opens the source site directly
+  function activateRow(el, shiftKey) {
+    if (!el || !el.dataset.id) return;
+    if (shiftKey && el.dataset.url) {
+      window.open(el.dataset.url, '_blank', 'noopener');
+    } else {
+      CTIDrawer.openById(el.dataset.id);
+    }
+  }
   $('news-list').addEventListener('click', (e) => {
     const item = e.target.closest('.news-item');
-    if (item && item.dataset.url) window.open(item.dataset.url, '_blank', 'noopener');
+    activateRow(item, e.shiftKey);
   });
+  $('news-list').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const item = e.target.closest('.news-item');
+    if (item) { e.preventDefault(); activateRow(item, e.shiftKey); }
+  });
+  // category headlines open the same drawer (they carry article ids)
+  document.body.addEventListener('click', (e) => {
+    const cat = e.target.closest('.cat-item');
+    if (cat) { CTIDrawer.openById(cat.dataset.id); return; }
+    const tl = e.target.closest('.tl-card[data-category]');
+    if (tl) {
+      const name = tl.dataset.category;
+      setFilter({ category: activeCategory === name ? null : name });
+      renderThreatsLast();
+      return;
+    }
+  });
+  document.body.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const cat = e.target.closest('.cat-item');
+    if (cat) { e.preventDefault(); CTIDrawer.openById(cat.dataset.id); return; }
+    const tl = e.target.closest('.tl-card[data-category]');
+    if (tl) { e.preventDefault(); setFilter({ category: activeCategory === tl.dataset.category ? null : tl.dataset.category }); renderThreatsLast(); }
+  });
+
   $('feed-chips').addEventListener('click', (e) => {
     const chip = e.target.closest('.feed-chip');
-    if (!chip || chip.dataset.group === activeGroup) return;
-    activeGroup = chip.dataset.group;
-    renderChips();
-    if (lastNews) renderNews(lastNews, true);
+    if (!chip) return;
+    const group = chip.dataset.group;
+    if ((group === activeGroup && !activeCategory)) return;
+    // choosing a group chip clears any threat-card category filter
+    setFilter({ group, category: null });
+  });
+
+  // single-column tab strip (≤767px)
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      $('main').dataset.tab = btn.dataset.tab;
+    });
   });
 
   // expose cities to the map module (from sim data via a tiny endpoint-free path:
@@ -470,11 +622,32 @@
   function boot() {
     renderHeaderClocks();
     setInterval(renderHeaderClocks, 1000);
+    initTheme();
+    // sound preference persists; control starts honest (off, aria-pressed)
+    const soundOn = localStorage.getItem('cti-sound') === '1';
+    $('btn-snd').setAttribute('aria-pressed', String(soundOn));
+    $('btn-snd').textContent = soundOn ? '🔊' : '🔇';
+
     registerRoller($('ticker'), 'x', 22);      // px/s — calmer headline crawl
     registerRoller($('news-list'), 'y', 12);   // px/s, ≈3.7s per headline
     registerRoller($('attack-list'), 'y', 10, 'end', renderAttacksTrack);
     registerRoller($('sources-grid'), 'y', 8);
-    startRollClock();
+    CTIMotion.frame(rollStep);                 // single shared worker clock
+    CTIMotion.onReducedChange((isReduced) => {
+      // reduced motion: park every roller and strip duplicated track copies
+      // (the duplicate would be visible while scrolling); leaving reduced
+      // re-measures and resumes the rolls
+      for (const [el] of rollers) {
+        if (isReduced) stopRoller(el);
+        else resetRoller(el);
+      }
+      renderTicker();
+      if (lastNews) renderNews(lastNews, true);
+      renderSources(sourcesState, true);
+      renderAttacksTrack();
+      renderCatStrip(true);
+    });
+
     pollNews(); pollVectors(); pollThreats(); pollStatus(); pollEvents(); pollThreatmap(); pollSources();
     setInterval(pollNews, 60000);
     setInterval(pollSources, 60000);

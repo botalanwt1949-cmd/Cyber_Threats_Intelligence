@@ -21,13 +21,28 @@
   let arcsOn = true;
   let globeRotation = 0;
   let lastEvents = [];
-  let rafHandle = null;
   let lastLegend = {};
 
+  // category colors come from the CSS custom properties so the theme swap
+  // (cti-theme event from dashboard.js) recolors the whole map layer
   const CAT_COLOR = { malware: '#ff4d5e', phishing: '#a24bff', exploit: '#f2b230' };
   const CATS = ['malware', 'phishing', 'exploit'];
   const catFilter = { malware: true, phishing: true, exploit: true };
   const SEV_NAME = ['LOW', 'MEDIUM', 'CRITICAL'];
+
+  function refreshColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const c of CATS) {
+      const v = cs.getPropertyValue(`--cat-${c}`).trim();
+      if (v) CAT_COLOR[c] = v;
+    }
+  }
+  refreshColors();
+  document.addEventListener('cti-theme', () => {
+    refreshColors();
+    renderLegend();
+    redrawEvents();
+  });
 
   const gRoot = SVG.append('g').attr('class', 'map-root');
   const gBack = gRoot.append('g');
@@ -235,20 +250,28 @@
 
   function hideTip() { tip.classList.add('hidden'); }
 
-  function spin() {
-    globeRotation = (globeRotation + 0.12) % 360;
-    applyProjection();
-    rafHandle = requestAnimationFrame(spin);
+  // globe rotation runs on the shared CTIMotion worker clock — rAF never
+  // fires on this host, and reduced-motion keeps the globe still
+  let spinUn = null;
+  function spinStart() {
+    if (spinUn || CTIMotion.reduced) return;
+    spinUn = CTIMotion.frame((dt) => {
+      globeRotation = (globeRotation + dt * 0.0036) % 360;   // ≈0.12°/frame at 30Hz
+      applyProjection();
+    });
+  }
+  function spinStop() {
+    if (spinUn) { spinUn(); spinUn = null; }
   }
 
   function setView(view) {
     currentView = view;
-    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
+    spinStop();
     wrap.classList.toggle('tilt', view === 'tilt');
     wrap.classList.toggle('glow', view === 'grid');
     gGraticule.selectAll('path').data(view === 'grid' || view === 'globe'
       ? [d3.geoGraticule10()] : []).join('path').attr('class', 'graticule');
-    if (view === 'globe') spin();
+    if (view === 'globe') spinStart();
     applyProjection();
   }
 
